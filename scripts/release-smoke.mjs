@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 
-const home = process.env.PASEO_RELEASE_HOME ?? join(homedir(), ".paseo-plugin-test");
+const home =
+  process.env.PASEO_RELEASE_HOME ?? join(homedir(), ".paseo-plugin-test");
 const port = process.env.PASEO_RELEASE_PORT ?? "6769";
 const projectId = process.env.PASEO_RELEASE_PROJECT_ID;
 const workspaceId = process.env.PASEO_RELEASE_WORKSPACE_ID;
@@ -13,7 +14,9 @@ const action = process.env.PASEO_SMOKE_ACTION ?? "verify";
 const statePath =
   process.env.PASEO_SMOKE_STATE ?? join(home, "release-smoke-state.json");
 
-const password = (await readFile(join(home, "local-credential"), "utf8")).trim();
+const password = (
+  await readFile(join(home, "local-credential"), "utf8")
+).trim();
 const client = new DaemonClient({
   url: `ws://127.0.0.1:${port}/ws`,
   password,
@@ -24,7 +27,9 @@ const client = new DaemonClient({
 async function call(pluginId, method, input = {}) {
   const envelope = await client.invokePluginRpc(pluginId, method, input);
   if (!envelope || typeof envelope !== "object" || envelope.ok !== true) {
-    throw new Error(`${pluginId}.${method} failed: ${JSON.stringify(envelope)}`);
+    throw new Error(
+      `${pluginId}.${method} failed: ${JSON.stringify(envelope)}`,
+    );
   }
   return envelope.value;
 }
@@ -46,9 +51,13 @@ async function seed() {
   requireEnv("PASEO_RELEASE_WORKSPACE_ID", workspaceId);
   requireEnv("PASEO_RELEASE_TEAM_REPO", teamRepo);
 
-  const projects = await call("agentstorm-shared-assets", "shared-assets.projects.list");
+  const projects = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.projects.list",
+  );
   const project = projects.find((entry) => entry.projectId === projectId);
-  if (!project) throw new Error(`Project not found in clean home: ${projectId}`);
+  if (!project)
+    throw new Error(`Project not found in clean home: ${projectId}`);
   if (project.bound) {
     await call("agentstorm-shared-assets", "shared-assets.unbind", {
       projectId,
@@ -63,12 +72,20 @@ async function seed() {
     syncMode: "manual",
     trustConfirmed: true,
   });
-  const status = await call("agentstorm-shared-assets", "shared-assets.status", {
-    projectId,
-  });
-  const assets = await call("agentstorm-shared-assets", "shared-assets.assets.list", {
-    projectId,
-  });
+  const status = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.status",
+    {
+      projectId,
+    },
+  );
+  const assets = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.assets.list",
+    {
+      projectId,
+    },
+  );
 
   for (const assetId of ["skill:project/code-review", "skill:global/writing"]) {
     await call("agentstorm-shared-assets", "shared-assets.skills.set-enabled", {
@@ -79,16 +96,24 @@ async function seed() {
       enabled: true,
     });
   }
-  await call("agentstorm-shared-assets", "shared-assets.instructions.set-enabled", {
-    projectId,
-    workspaceId,
-    provider: "both",
-    enabled: true,
-  });
-  const skills = await call("agentstorm-shared-assets", "shared-assets.skills.list", {
-    projectId,
-    workspaceId,
-  });
+  await call(
+    "agentstorm-shared-assets",
+    "shared-assets.instructions.set-enabled",
+    {
+      projectId,
+      workspaceId,
+      provider: "both",
+      enabled: true,
+    },
+  );
+  const skills = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.skills.list",
+    {
+      projectId,
+      workspaceId,
+    },
+  );
   const instructions = await call(
     "agentstorm-shared-assets",
     "shared-assets.instructions.status",
@@ -97,7 +122,8 @@ async function seed() {
 
   const created = await call("agentstorm-task-board", "task-board.create", {
     title: `I5 release smoke ${new Date().toISOString()}`,
-    description: "Created by scripts/release-smoke.mjs; survives upgrade and restart.",
+    description:
+      "Created by scripts/release-smoke.mjs; survives upgrade and restart.",
     labels: ["i5-release"],
     projectId,
   });
@@ -141,16 +167,28 @@ async function seed() {
 
 async function verify() {
   const state = JSON.parse(await readFile(statePath, "utf8"));
-  const status = await call("agentstorm-shared-assets", "shared-assets.status", {
-    projectId: state.projectId,
-  });
-  const assets = await call("agentstorm-shared-assets", "shared-assets.assets.list", {
-    projectId: state.projectId,
-  });
-  const skills = await call("agentstorm-shared-assets", "shared-assets.skills.list", {
-    projectId: state.projectId,
-    workspaceId: state.workspaceId,
-  });
+  const status = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.status",
+    {
+      projectId: state.projectId,
+    },
+  );
+  const assets = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.assets.list",
+    {
+      projectId: state.projectId,
+    },
+  );
+  const skills = await call(
+    "agentstorm-shared-assets",
+    "shared-assets.skills.list",
+    {
+      projectId: state.projectId,
+      workspaceId: state.workspaceId,
+    },
+  );
   const instructions = await call(
     "agentstorm-shared-assets",
     "shared-assets.instructions.status",
@@ -182,7 +220,9 @@ async function verify() {
   const missingAssets = state.assetIds.filter(
     (assetId) => !assets.some((asset) => asset.assetId === assetId),
   );
-  const missingProjections = projections.filter((projection) => !projection.exists);
+  const missingProjections = projections.filter(
+    (projection) => !projection.exists,
+  );
   const result = {
     action: "verify",
     ok:
@@ -212,7 +252,8 @@ async function verify() {
     instructionTargets,
     boardHealth: health,
   };
-  if (!result.ok) throw new Error(`Smoke verification failed: ${JSON.stringify(result)}`);
+  if (!result.ok)
+    throw new Error(`Smoke verification failed: ${JSON.stringify(result)}`);
   return result;
 }
 

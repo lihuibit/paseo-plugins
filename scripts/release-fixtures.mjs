@@ -58,7 +58,10 @@ execFileSync("git", ["clone", "--quiet", "--bare", origin, bare]);
 
 await writeFile(join(project, "README.md"), "# Release demo project\n");
 await mkdir(join(project, "notes"), { recursive: true });
-await writeFile(join(project, "notes/user-file.txt"), "user data must survive plugin removal\n");
+await writeFile(
+  join(project, "notes/user-file.txt"),
+  "user data must survive plugin removal\n",
+);
 git(project, "init", "--quiet");
 git(project, "config", "user.name", "Release Fixture");
 git(project, "config", "user.email", "release-fixture@example.invalid");
