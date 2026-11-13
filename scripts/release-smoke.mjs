@@ -127,6 +127,14 @@ async function seed() {
     labels: ["i5-release"],
     projectId,
   });
+  const scheduledRunAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const scheduled = await call("agentstorm-task-board", "task-board.create", {
+    title: `I5 scheduled probe ${scheduledRunAt}`,
+    description: "Scheduled trigger must survive upgrade and daemon restart.",
+    labels: ["i5-release", "i5-scheduled"],
+    projectId,
+    trigger: { kind: "scheduled", runAt: scheduledRunAt },
+  });
   const health = await call("agentstorm-task-board", "task-board.health", {});
 
   const projections = [];
@@ -155,6 +163,8 @@ async function seed() {
     cardId: created.task.id,
     cardStatus: created.task.status,
     cardRevision: created.task.revision,
+    scheduledCardId: scheduled.task.id,
+    scheduledRunAt,
     bindingLocalRevision: status.binding.state.localRevision,
     assetIds: assets.map((asset) => asset.assetId),
     projections,
@@ -197,6 +207,9 @@ async function verify() {
   const card = await call("agentstorm-task-board", "task-board.get", {
     taskId: state.cardId,
   });
+  const scheduled = await call("agentstorm-task-board", "task-board.get", {
+    taskId: state.scheduledCardId,
+  });
   const health = await call("agentstorm-task-board", "task-board.health", {});
 
   const projections = [];
@@ -229,6 +242,8 @@ async function verify() {
       status.binding.state.localRevision === state.bindingLocalRevision &&
       card.task.id === state.cardId &&
       card.task.revision >= state.cardRevision &&
+      scheduled.task.trigger?.kind === "scheduled" &&
+      scheduled.task.trigger.runAt === state.scheduledRunAt &&
       missingAssets.length === 0 &&
       missingProjections.length === 0,
     binding: {
@@ -242,6 +257,11 @@ async function verify() {
       revision: card.task.revision,
       expectedRevision: state.cardRevision,
       title: card.task.title,
+    },
+    scheduled: {
+      id: scheduled.task.id,
+      trigger: scheduled.task.trigger,
+      expectedRunAt: state.scheduledRunAt,
     },
     assets: {
       count: assets.length,
