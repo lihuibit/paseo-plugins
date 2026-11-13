@@ -1,0 +1,40 @@
+{
+  "name": "paseo-plugins",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Paseo plugins maintained by the AgentStorm team",
+  "workspaces": [
+    "packages/*",
+    "plugins/*"
+  ],
+  "scripts": {
+    "sync:core": "node scripts/sync-core.mjs",
+    "check:core": "node scripts/sync-core.mjs --check",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test --workspaces --if-present",
+    "e2e": "node scripts/e2e-rpc.mjs",
+    "e2e:i3": "node scripts/e2e-i3.mjs",
+    "e2e:task-board": "node scripts/e2e-task-board.mjs",
+    "e2e:i4": "node scripts/e2e-i4.mjs",
+    "e2e:i4-migrate": "node scripts/e2e-i4-migrate.mjs",
+    "verify": "npm run check:core && npm run typecheck && npm run lint && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@getpaseo/plugin": "0.16.0-beta.2",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^22.19.0",
+    "@types/react": "~19.2.0",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^3.2.7",
+    "zod": "^4.4.3"
+  }
+}

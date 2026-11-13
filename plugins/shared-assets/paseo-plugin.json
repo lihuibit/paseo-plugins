@@ -1,0 +1,12 @@
+{
+  "id": "agentstorm-shared-assets",
+  "name": "Shared Assets",
+  "description": "Team Git-backed skills, AGENTS.md, knowledge and docs for Paseo projects.",
+  "requirements": {
+    "paseo": ">=0.16.0 <0.17.0"
+  },
+  "build": [
+    ["npm", "ci", "--prefix", "../..", "--no-audit", "--no-fund"],
+    ["npm", "run", "sync:core", "--prefix", "../.."]
+  ]
+}

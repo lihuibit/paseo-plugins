@@ -1,0 +1,22 @@
+export interface TeamAssetsManifest {
+  schemaVersion: number;
+  libraryId: string;
+  displayName: string;
+}
+
+export function parseTeamAssetsManifest(
+  value: unknown,
+): TeamAssetsManifest | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== 1) return null;
+  if (typeof record.libraryId !== "string" || !record.libraryId.trim())
+    return null;
+  if (typeof record.displayName !== "string" || !record.displayName.trim())
+    return null;
+  return {
+    schemaVersion: 1,
+    libraryId: record.libraryId,
+    displayName: record.displayName,
+  };
+}

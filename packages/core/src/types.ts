@@ -1,0 +1,363 @@
+import type { RpcError } from "./errors";
+
+export type SyncMode = "auto" | "manual";
+export type AssetKind = "skill" | "prompt" | "knowledge" | "doc";
+export type SkillScope = "project" | "global";
+export type ProviderId =
+  "codex" | "claude" | "pi" | "copilot" | "opencode" | "antigravity" | "muse";
+export type ProviderSelection = ProviderId | "both";
+
+export interface BindingState {
+  localRevision: string | null;
+  remoteRevision: string | null;
+  lastFetchedAt: string | null;
+  lastSyncedAt: string | null;
+  operation: "idle" | "fetching" | "syncing" | "publishing";
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+  lastError: RpcError | null;
+}
+
+export interface Binding {
+  projectId: string;
+  projectRoot: string;
+  libraryId: string;
+  displayName: string;
+  repoUrl: string;
+  branch: string | null;
+  syncMode: SyncMode;
+  configuredAt: string;
+  revision: number;
+  state: BindingState;
+}
+
+export interface SkillProjection {
+  assetId: string;
+  name: string;
+  provider: ProviderId;
+  targetPath: string;
+  baselineDigest: string;
+  updatedAt: string;
+}
+
+export type InstructionProvider = ProviderId;
+
+export interface InstructionProjection {
+  provider: InstructionProvider;
+  targetPath: string;
+  kind: "symlink" | "copy";
+  baselineDigest: string | null;
+  updatedAt: string;
+}
+
+export interface CanonicalInstruction {
+  targetPath: string;
+  baselineDigest: string;
+  updatedAt: string;
+}
+
+export interface PluginConfig {
+  version: 1;
+  bindings: Record<string, Binding>;
+  skills: Record<string, SkillProjection[]>;
+  instructions: Record<
+    string,
+    {
+      canonical: CanonicalInstruction | null;
+      providers: InstructionProjection[];
+    }
+  >;
+  settings: {
+    monitorIntervalMs: number;
+  };
+}
+
+export interface WorkspaceSummary {
+  workspaceId: string;
+  name: string;
+  directory: string;
+  kind: string;
+  background: boolean;
+}
+
+export interface ProjectSummary {
+  projectId: string;
+  displayName: string;
+  rootPath: string;
+  bound: boolean;
+  libraryId: string | null;
+  syncMode: SyncMode | null;
+  workspaces: WorkspaceSummary[];
+}
+
+export interface AssetFile {
+  path: string;
+  size: number;
+}
+
+export interface AssetSummary {
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  scope: SkillScope | null;
+  description: string | null;
+  path: string;
+  fileCount: number;
+  totalBytes: number;
+  files: AssetFile[];
+  warnings: string[];
+}
+
+export type ProjectionState = "managed" | "missing" | "modified";
+
+export interface SkillProjectionStatus {
+  assetId: string;
+  provider: ProviderId;
+  targetPath: string;
+  state: ProjectionState;
+}
+
+export interface SkillListResult {
+  skills: AssetSummary[];
+  projections: SkillProjectionStatus[];
+  warnings: string[];
+}
+
+export type InstructionTargetState = "absent" | "managed" | "conflict";
+
+export interface InstructionTargetStatus {
+  provider: ProviderId;
+  targetPath: string;
+  state: InstructionTargetState;
+  owned: boolean;
+}
+
+export interface InstructionStatusResult {
+  sharedExists: boolean;
+  sharedDigest: string | null;
+  canonical: {
+    targetPath: string;
+    exists: boolean;
+    managed: boolean;
+    matchesShared: boolean;
+  };
+  targets: InstructionTargetStatus[];
+}
+
+export interface AssetReadResult {
+  assetId: string;
+  path: string;
+  kind: "text" | "image" | "binary";
+  mimeType: string | null;
+  content: string | null;
+  dataUri: string | null;
+  size: number;
+  truncated: boolean;
+}
+
+export interface PublishPreviewItem {
+  assetId: string;
+  targetPath: string;
+  diff: string;
+}
+
+export interface PublishPreview {
+  expectedRevision: string;
+  item: PublishPreviewItem;
+  warnings: string[];
+}
+
+export interface PublishCommitResult {
+  commit: string;
+  targetPath: string;
+  pushed: false;
+  pushHint: string;
+}
+
+export type DriftStatus =
+  | "synced"
+  | "local-update"
+  | "remote-update"
+  | "diverged"
+  | "remote-deleted"
+  | "unpublished-local"
+  | "missing";
+
+export interface DriftFileStatus {
+  path: string;
+  repositoryPath: string;
+  status: DriftStatus;
+  baseDigest: string | null;
+  localDigest: string | null;
+  remoteDigest: string | null;
+}
+
+export interface DriftItem {
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  scope: SkillScope | null;
+  provider: ProviderId | null;
+  targetPath: string;
+  status: DriftStatus;
+  files: DriftFileStatus[];
+  ignored: boolean;
+}
+
+export interface AssetDiffResult {
+  assetId: string;
+  path: string | null;
+  kind: "text" | "binary";
+  base: string | null;
+  local: string | null;
+  remote: string | null;
+  localDiff: string;
+  remoteDiff: string;
+  netDiff: string;
+}
+
+export interface MergeConflictView {
+  id: string;
+  base: string;
+  local: string;
+  remote: string;
+  localDiff: string;
+  remoteDiff: string;
+}
+
+export interface MergePreviewResult {
+  assetId: string;
+  repositoryPath: string;
+  localPath: string;
+  merged: string;
+  conflicts: MergeConflictView[];
+  hasConflicts: boolean;
+  expectedLocalDigest: string | null;
+  expectedRemoteDigest: string | null;
+}
+
+export interface MergeResolution {
+  conflictId: string;
+  choice: "local" | "remote" | "both" | "custom";
+  content?: string;
+}
+
+export interface MergeApplyResult {
+  assetId: string;
+  repositoryPath: string;
+  content: string;
+  conflictsRemaining: number;
+  baselineUpdatedTo: string | null;
+}
+
+export type BatchPublishState =
+  "eligible" | "warning" | "ineligible" | "skipped";
+
+export interface BatchPublishReason {
+  code: string;
+  message: string;
+}
+
+export interface BatchPublishFilePreview {
+  path: string;
+  repositoryPath: string;
+  size: number;
+  diff: string;
+}
+
+export interface BatchPublishItemPreview {
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  targetPath: string;
+  state: BatchPublishState;
+  reasons: BatchPublishReason[];
+  files: BatchPublishFilePreview[];
+  diff: string;
+}
+
+export interface BatchPublishPreview {
+  expectedRevision: string;
+  items: BatchPublishItemPreview[];
+  skipped: Array<{ assetId: string; reason: string }>;
+}
+
+export interface BatchPublishItemResult {
+  assetId: string;
+  state: "published" | "failed" | "skipped";
+  targetPath: string;
+  files: string[];
+  reason: string | null;
+}
+
+export interface BatchPublishResult {
+  commit: string | null;
+  pushed: false;
+  pushHint: string;
+  published: BatchPublishItemResult[];
+  failed: BatchPublishItemResult[];
+  skipped: BatchPublishItemResult[];
+  rolledBack: boolean;
+}
+
+export interface IgnoreRulesResult {
+  raw: string;
+  rules: Array<
+    | { type: "path"; value: string }
+    | { type: "kind"; value: AssetKind }
+    | { type: "asset"; value: string }
+  >;
+  errors: Array<{ line: number; message: string }>;
+}
+
+export interface DriftIgnoreEntry {
+  assetId: string;
+  path: string | null;
+  reason: string;
+  ignoredAt: string;
+}
+
+export interface MigrationFilePlan {
+  sourcePath: string;
+  repositoryPath: string;
+  action: "import" | "skip" | "conflict";
+  reason: string | null;
+  diff: string;
+}
+
+export interface MigrationSummary {
+  files: number;
+  bytes: number;
+  digest: string;
+}
+
+export interface MigrationReport {
+  projectId: string;
+  workspaceId: string;
+  dryRun: boolean;
+  sourceDigest: string;
+  appliedAt: string | null;
+  reused: boolean;
+  applied: boolean;
+  files: MigrationFilePlan[];
+  skipped: Array<{ path: string; reason: string }>;
+  conflicts: Array<{ path: string; reason: string; diff: string }>;
+  candidates: { skills: string[] };
+  before: MigrationSummary;
+  after: MigrationSummary;
+  commit: string | null;
+}
+
+export interface ProviderStatus {
+  id: ProviderId;
+  label: string;
+  binary: string | null;
+  installed: boolean;
+  skillRoot: string | null;
+  userSkillRoot: string | null;
+  instructionEntrypoint: string | null;
+  skillVerified: boolean;
+  instructionVerified: boolean;
+  note: string;
+}

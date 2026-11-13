@@ -1,0 +1,20 @@
+{
+  "name": "agentstorm-task-board",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent-driven task board for Paseo",
+  "files": [
+    "paseo-plugin.json",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --bail=1"
+  }
+}

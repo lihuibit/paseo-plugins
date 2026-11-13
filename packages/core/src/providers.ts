@@ -1,0 +1,126 @@
+import type { ProviderId } from "./types";
+
+export interface ProviderDescriptor {
+  id: ProviderId;
+  label: string;
+  binary: string | null;
+  skillRoot: string | null;
+  userSkillRoot: string | null;
+  instructionEntrypoint: string | null;
+  skillVerified: boolean;
+  instructionVerified: boolean;
+  note: string;
+}
+
+/**
+ * Provider matrix from the I3 design. Only Codex has a real load check; the
+ * rest keep their documented directories but are shown as unverified.
+ */
+export const PROVIDERS: readonly ProviderDescriptor[] = [
+  {
+    id: "codex",
+    label: "Codex",
+    binary: "codex",
+    skillRoot: ".codex/skills",
+    userSkillRoot: "~/.codex/skills",
+    instructionEntrypoint: "AGENTS.md",
+    skillVerified: true,
+    instructionVerified: true,
+    note: "S4 实测 codex debug prompt-input 可见",
+  },
+  {
+    id: "claude",
+    label: "Claude",
+    binary: "claude",
+    skillRoot: ".claude/skills",
+    userSkillRoot: "~/.claude/skills",
+    instructionEntrypoint: ".claude/CLAUDE.md",
+    skillVerified: false,
+    instructionVerified: false,
+    note: "目录约定成立；Paseo 内加载未验证",
+  },
+  {
+    id: "pi",
+    label: "Pi",
+    binary: "pi",
+    skillRoot: ".pi/skills",
+    userSkillRoot: "~/.pi/agent/skills",
+    instructionEntrypoint: ".pi/APPEND_SYSTEM.md",
+    skillVerified: false,
+    instructionVerified: false,
+    note: "目录约定成立；Paseo 内加载未验证",
+  },
+  {
+    id: "copilot",
+    label: "Copilot",
+    binary: "copilot",
+    skillRoot: ".github/skills",
+    userSkillRoot: "~/.copilot/skills",
+    instructionEntrypoint: ".github/copilot-instructions.md",
+    skillVerified: false,
+    instructionVerified: false,
+    note: "未验证：CLI 未安装",
+  },
+  {
+    id: "opencode",
+    label: "OpenCode",
+    binary: "opencode",
+    skillRoot: ".opencode/skills",
+    userSkillRoot: "~/.config/opencode/skills",
+    instructionEntrypoint: null,
+    skillVerified: false,
+    instructionVerified: false,
+    note: "未验证：入口与 codex 同为 AGENTS.md，暂不投影指令",
+  },
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    binary: "antigravity",
+    skillRoot: null,
+    userSkillRoot: null,
+    instructionEntrypoint: null,
+    skillVerified: false,
+    instructionVerified: false,
+    note: "未验证：目录未知，不投影",
+  },
+  {
+    id: "muse",
+    label: "Muse",
+    binary: "muse",
+    skillRoot: null,
+    userSkillRoot: null,
+    instructionEntrypoint: null,
+    skillVerified: false,
+    instructionVerified: false,
+    note: "未验证：Muse 自管 project rules/skills",
+  },
+];
+
+export const SUPPORTED_PROVIDERS: readonly ProviderId[] = PROVIDERS.filter(
+  (provider) => provider.skillRoot !== null,
+).map((provider) => provider.id);
+
+export const SKILL_ROOTS = Object.fromEntries(
+  PROVIDERS.map((provider) => [provider.id, provider.skillRoot]),
+) as Record<ProviderId, string | null>;
+
+export const INSTRUCTION_ENTRYPOINTS = Object.fromEntries(
+  PROVIDERS.map((provider) => [provider.id, provider.instructionEntrypoint]),
+) as Record<ProviderId, string | null>;
+
+export const PROVIDER_LABELS = Object.fromEntries(
+  PROVIDERS.map((provider) => [provider.id, provider.label]),
+) as Record<ProviderId, string>;
+
+export function providerDescriptor(id: ProviderId): ProviderDescriptor | null {
+  return PROVIDERS.find((provider) => provider.id === id) ?? null;
+}
+
+export function isProviderId(value: string): value is ProviderId {
+  return (SUPPORTED_PROVIDERS as readonly string[]).includes(value);
+}
+
+export function expandProvider(selection: string): ProviderId[] {
+  if (selection === "both") return ["codex", "claude"];
+  return isProviderId(selection) ? [selection] : [];
+}

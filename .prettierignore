@@ -1,0 +1,5 @@
+node_modules
+plugins/shared-assets/shared/core
+plugins/task-board/shared/core
+coverage
+*.png

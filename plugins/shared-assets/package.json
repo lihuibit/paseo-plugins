@@ -1,0 +1,20 @@
+{
+  "name": "agentstorm-shared-assets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Git-backed team skills, instructions, knowledge and docs for Paseo projects",
+  "files": [
+    "paseo-plugin.json",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --bail=1"
+  }
+}

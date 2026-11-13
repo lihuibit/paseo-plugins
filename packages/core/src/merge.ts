@@ -1,0 +1,232 @@
+const MAX_MERGE_LINES = 4000;
+
+export interface MergeConflict {
+  id: string;
+  base: string;
+  local: string;
+  remote: string;
+}
+
+export interface MergeResult {
+  merged: string;
+  conflicts: MergeConflict[];
+}
+
+interface Hunk {
+  start: number;
+  end: number;
+  lines: string[];
+}
+
+function splitLines(text: string): string[] {
+  if (text === "") return [];
+  return text.replace(/\r\n/g, "\n").split("\n");
+}
+
+/**
+ * Line hunks that turn `base` into `variant`. A hunk replaces
+ * `base[start..end)` with `lines`.
+ */
+function diffHunks(base: string[], variant: string[]): Hunk[] {
+  const n = base.length;
+  const m = variant.length;
+  if (n + m > MAX_MERGE_LINES) {
+    return [{ start: 0, end: n, lines: variant }];
+  }
+
+  const width = m + 1;
+  const table = new Uint16Array((n + 1) * width);
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      table[i * width + j] =
+        base[i] === variant[j]
+          ? (table[(i + 1) * width + j + 1] ?? 0) + 1
+          : Math.max(
+              table[(i + 1) * width + j] ?? 0,
+              table[i * width + j + 1] ?? 0,
+            );
+    }
+  }
+
+  const hunks: Hunk[] = [];
+  let i = 0;
+  let j = 0;
+  let pending: Hunk | null = null;
+
+  const pushDelete = () => {
+    pending ??= { start: i, end: i, lines: [] };
+    pending.end = i + 1;
+    i += 1;
+  };
+  const pushInsert = (line: string) => {
+    pending ??= { start: i, end: i, lines: [] };
+    pending.lines.push(line);
+    j += 1;
+  };
+  const flush = () => {
+    if (pending) hunks.push(pending);
+    pending = null;
+  };
+
+  while (i < n && j < m) {
+    if (base[i] === variant[j]) {
+      flush();
+      i += 1;
+      j += 1;
+    } else if (
+      (table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0)
+    ) {
+      pushDelete();
+    } else {
+      pushInsert(variant[j] as string);
+    }
+  }
+  while (i < n) pushDelete();
+  while (j < m) pushInsert(variant[j] as string);
+  flush();
+  return hunks;
+}
+
+function overlaps(a: Hunk, b: Hunk): boolean {
+  if (a.start === a.end && b.start === b.end) return a.start === b.start;
+  if (a.start === a.end) return b.start < a.start && a.start < b.end;
+  if (b.start === b.end) return a.start < b.start && b.start < a.end;
+  return a.start < b.end && b.start < a.end;
+}
+
+function within(candidate: Hunk, start: number, end: number): boolean {
+  if (candidate.start === candidate.end) {
+    if (start === end) return candidate.start === start;
+    return start < candidate.start && candidate.start < end;
+  }
+  if (start === end) return candidate.start < start && start < candidate.end;
+  return candidate.start < end && start < candidate.end;
+}
+
+function nextHunk(
+  local: Hunk[],
+  remote: Hunk[],
+  localIndex: number,
+  remoteIndex: number,
+): Hunk {
+  const left = local[localIndex];
+  const right = remote[remoteIndex];
+  if (!left) return right as Hunk;
+  if (!right) return left;
+  return left.start <= right.start ? left : right;
+}
+
+/** Renders `base[start..end)` after applying only the hunks inside the range. */
+function renderRegion(
+  base: string[],
+  start: number,
+  end: number,
+  hunks: Hunk[],
+): string {
+  const lines: string[] = [];
+  let cursor = start;
+  for (const hunk of hunks) {
+    if (hunk.end < start || hunk.start > end) continue;
+    const from = Math.max(hunk.start, start);
+    const to = Math.min(hunk.end, end);
+    lines.push(...base.slice(cursor, from));
+    lines.push(...hunk.lines);
+    cursor = Math.max(cursor, to);
+  }
+  lines.push(...base.slice(cursor, end));
+  return lines.join("\n");
+}
+
+/**
+ * Three-way line merge. Overlapping edits become conflicts; independent edits
+ * merge automatically.
+ */
+export function merge3(
+  baseText: string,
+  localText: string,
+  remoteText: string,
+): MergeResult {
+  const base = splitLines(baseText);
+  const local = diffHunks(base, splitLines(localText));
+  const remote = diffHunks(base, splitLines(remoteText));
+
+  const output: string[] = [];
+  const conflicts: MergeConflict[] = [];
+  let cursor = 0;
+  let localIndex = 0;
+  let remoteIndex = 0;
+
+  while (localIndex < local.length || remoteIndex < remote.length) {
+    const hunk = nextHunk(local, remote, localIndex, remoteIndex);
+    const other =
+      hunk === local[localIndex] ? remote[remoteIndex] : local[localIndex];
+    if (!other || !overlaps(hunk, other)) {
+      output.push(...base.slice(cursor, hunk.start));
+      output.push(...hunk.lines);
+      cursor = hunk.end;
+      if (hunk === local[localIndex]) localIndex += 1;
+      else remoteIndex += 1;
+      continue;
+    }
+
+    let start = hunk.start;
+    let end = hunk.end;
+    const localCluster: Hunk[] = [];
+    const remoteCluster: Hunk[] = [];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      while (localIndex < local.length) {
+        const candidate = local[localIndex] as Hunk;
+        if (within(candidate, start, end)) {
+          localCluster.push(candidate);
+          start = Math.min(start, candidate.start);
+          end = Math.max(end, candidate.end);
+          localIndex += 1;
+          grew = true;
+        } else break;
+      }
+      while (remoteIndex < remote.length) {
+        const candidate = remote[remoteIndex] as Hunk;
+        if (within(candidate, start, end)) {
+          remoteCluster.push(candidate);
+          start = Math.min(start, candidate.start);
+          end = Math.max(end, candidate.end);
+          remoteIndex += 1;
+          grew = true;
+        } else break;
+      }
+    }
+
+    const localTextRegion = renderRegion(base, start, end, localCluster);
+    const remoteTextRegion = renderRegion(base, start, end, remoteCluster);
+    output.push(...base.slice(cursor, start));
+    if (localTextRegion === remoteTextRegion) {
+      output.push(...localTextRegion.split("\n"));
+    } else {
+      const id = `c${conflicts.length + 1}`;
+      conflicts.push({
+        id,
+        base: base.slice(start, end).join("\n"),
+        local: localTextRegion,
+        remote: remoteTextRegion,
+      });
+      output.push(
+        "<<<<<<< local",
+        ...localTextRegion.split("\n"),
+        "=======",
+        ...remoteTextRegion.split("\n"),
+        ">>>>>>> shared",
+      );
+    }
+    cursor = end;
+  }
+
+  output.push(...base.slice(cursor));
+  return { merged: output.join("\n"), conflicts };
+}
+
+/** True when `text` still carries merge markers produced by {@link merge3}. */
+export function hasConflictMarkers(text: string): boolean {
+  return /^<{7} local$/m.test(text) && /^>{7} shared$/m.test(text);
+}
