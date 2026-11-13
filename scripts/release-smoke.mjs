@@ -246,7 +246,14 @@ async function verify() {
   }
 
   const missingAssets = state.assetIds.filter(
-    (assetId) => !assets.some((asset) => asset.assetId === assetId),
+    (assetId) =>
+      !assetId.startsWith("skill:global/") &&
+      !assets.some((asset) => asset.assetId === assetId),
+  );
+  const removedGlobalSkills = state.assetIds.filter(
+    (assetId) =>
+      assetId.startsWith("skill:global/") &&
+      !assets.some((asset) => asset.assetId === assetId),
   );
   const missingProjections = projections.filter(
     (projection) => !projection.exists,
@@ -289,6 +296,7 @@ async function verify() {
     assets: {
       count: assets.length,
       missing: missingAssets,
+      removedGlobalSkills,
     },
     projections,
     missingProjections,
