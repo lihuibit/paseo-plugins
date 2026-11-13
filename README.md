@@ -2,6 +2,12 @@
 
 Paseo 插件 monorepo。
 
+| 组件              | 版本    |
+| ----------------- | ------- |
+| `shared-assets`   | `0.2.0` |
+| `task-board`      | `0.2.0` |
+| `paseo-board` CLI | `0.1.1` |
+
 - `shared-assets`：把团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 绑定到
   Paseo Project，并投影到 Provider 原生目录。
 - `task-board`：Agent 驱动的任务看板，支持卡片、分配 Agent、启动/停止、

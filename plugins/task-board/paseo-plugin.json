@@ -1,5 +1,6 @@
 {
   "id": "agentstorm-task-board",
+  "version": "0.2.0",
   "name": "Task Board",
   "description": "Agent-driven task board: cards, assignment, lifecycle hooks and board_declare.",
   "requirements": {

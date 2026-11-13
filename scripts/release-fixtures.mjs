@@ -48,6 +48,10 @@ await writeFile(
   join(origin, "knowledge/release.md"),
   "# Release\n\nThis file proves shared assets survive plugin upgrade, restart and removal.\n",
 );
+await writeFile(
+  join(origin, "knowledge/beta.md"),
+  "# Beta\n\nUsed by I5 shared-asset relationship and attention checks.\n",
+);
 
 git(origin, "init", "--quiet");
 git(origin, "config", "user.name", "Release Fixture");

@@ -1,5 +1,7 @@
 # `paseo-board`
 
+版本：`0.1.1`。
+
 从普通 shell 管理 Paseo 任务看板，不需要成为 Paseo Agent，也不引入 MCP server。
 外部 Agent（例如用户自己启动的 Claude Code）通过 Bash 调用 `paseo-board ... --json`
 就能看卡片、管理子任务并读取 Agent 输出。

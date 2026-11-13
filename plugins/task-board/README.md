@@ -1,5 +1,7 @@
 # Task Board（`agentstorm-task-board`）
 
+版本：`0.2.0`。
+
 Paseo 任务看板插件：卡片、分配 Agent、启动/停止、生命周期 hooks 驱动状态、
 Agent 主动调用的 `board_declare` 工具，以及定时/周期、WeCom 通知、父子任务和
 旧任务迁移。只支持 Agent 执行，不包含 Pipeline。

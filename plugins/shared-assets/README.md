@@ -1,5 +1,7 @@
 # Shared Assets (Paseo plugin)
 
+版本：`0.2.0`。`skills/global` 移除属于 breaking change，升级前请阅读本节。
+
 团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 的项目级投影。
 共享库只支持 `skills/project/<name>/`；`skills/global/` 已废弃，即使目录存在也不会
 被扫描或管理。

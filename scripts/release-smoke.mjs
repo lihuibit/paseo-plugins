@@ -87,7 +87,7 @@ async function seed() {
     },
   );
 
-  for (const assetId of ["skill:project/code-review", "skill:global/writing"]) {
+  for (const assetId of ["skill:project/code-review"]) {
     await call("agentstorm-shared-assets", "shared-assets.skills.set-enabled", {
       projectId,
       workspaceId,
@@ -135,6 +135,16 @@ async function seed() {
     projectId,
     trigger: { kind: "scheduled", runAt: scheduledRunAt },
   });
+  const recurring = await call("agentstorm-task-board", "task-board.create", {
+    title: "I5 recurring probe",
+    description: "Recurring trigger must survive upgrade and daemon restart.",
+    labels: ["i5-release", "i5-recurring"],
+    projectId,
+    trigger: {
+      kind: "recurring",
+      cadence: { type: "every", everyMs: 3_600_000 },
+    },
+  });
   const health = await call("agentstorm-task-board", "task-board.health", {});
 
   const projections = [];
@@ -165,6 +175,8 @@ async function seed() {
     cardRevision: created.task.revision,
     scheduledCardId: scheduled.task.id,
     scheduledRunAt,
+    recurringCardId: recurring.task.id,
+    recurringEveryMs: 3_600_000,
     bindingLocalRevision: status.binding.state.localRevision,
     assetIds: assets.map((asset) => asset.assetId),
     projections,
@@ -210,6 +222,9 @@ async function verify() {
   const scheduled = await call("agentstorm-task-board", "task-board.get", {
     taskId: state.scheduledCardId,
   });
+  const recurring = await call("agentstorm-task-board", "task-board.get", {
+    taskId: state.recurringCardId,
+  });
   const health = await call("agentstorm-task-board", "task-board.health", {});
 
   const projections = [];
@@ -244,6 +259,9 @@ async function verify() {
       card.task.revision >= state.cardRevision &&
       scheduled.task.trigger?.kind === "scheduled" &&
       scheduled.task.trigger.runAt === state.scheduledRunAt &&
+      recurring.task.trigger?.kind === "recurring" &&
+      recurring.task.trigger.cadence?.type === "every" &&
+      recurring.task.trigger.cadence.everyMs === state.recurringEveryMs &&
       missingAssets.length === 0 &&
       missingProjections.length === 0,
     binding: {
@@ -262,6 +280,11 @@ async function verify() {
       id: scheduled.task.id,
       trigger: scheduled.task.trigger,
       expectedRunAt: state.scheduledRunAt,
+    },
+    recurring: {
+      id: recurring.task.id,
+      trigger: recurring.task.trigger,
+      expectedEveryMs: state.recurringEveryMs,
     },
     assets: {
       count: assets.length,

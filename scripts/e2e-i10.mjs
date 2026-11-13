@@ -125,6 +125,17 @@ async function main() {
     configured.binding.state.localRevision;
   step("configure", { libraryId: configured.binding.libraryId });
 
+  const synced = await callOk("shared-assets.sync", { projectId });
+  assert(
+    synced.binding.state.localRevision,
+    "sync did not report a local revision",
+  );
+  evidence.assertions.sync = {
+    changed: synced.changed,
+    localRevision: synced.binding.state.localRevision,
+  };
+  step("sync", evidence.assertions.sync);
+
   await callOk("shared-assets.workspace.pull", { projectId, workspaceId });
   step("workspace pull");
 
@@ -332,6 +343,23 @@ async function main() {
     newRevision: refreshed.expectedRevision,
   };
   step("stale preview", evidence.assertions.stalePreview);
+
+  const ignoreSet = await callOk("shared-assets.ignore.rules.set", {
+    projectId,
+    raw: "path:knowledge/ignored-*\nkind:doc\n",
+    message: "test: ignore rules",
+  });
+  const ignoreGet = await callOk("shared-assets.ignore.rules.get", {
+    projectId,
+  });
+  assert(ignoreSet.rules.length === 2, "ignore rules were not saved");
+  assert(ignoreGet.raw === ignoreSet.raw, "ignore rules did not round-trip");
+  evidence.assertions.ignoreRules = {
+    rules: ignoreGet.rules,
+    errors: ignoreGet.errors,
+    commit: ignoreSet.commit,
+  };
+  step("ignore rules", evidence.assertions.ignoreRules);
 
   await execFileSync("mkdir", ["-p", join(checkout, "skills/global/legacy")], {
     encoding: "utf8",
