@@ -169,7 +169,7 @@ async function runInner(
 ): Promise<number> {
   const parsed = parseArgs(argv);
   if (boolFlag(parsed, "version")) {
-    io.stdout("0.1.0\n");
+    io.stdout("0.1.1\n");
     return 0;
   }
   if (!parsed.command || parsed.command === "help") {
