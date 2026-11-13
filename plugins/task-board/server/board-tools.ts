@@ -688,6 +688,7 @@ export function createBoardAdminTools(
       await requireAdmin(context);
       const input = raw as { taskId: string; expectedRevision?: number };
       const task = await service.setStatus(
+        context.paseo,
         input.taskId,
         "done",
         await revisionFor(service, input.taskId, input.expectedRevision),

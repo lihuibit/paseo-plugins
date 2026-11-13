@@ -11,6 +11,19 @@ import {
 } from "../shared/contracts";
 import { AgentConfigFields } from "./agent-config-fields";
 import {
+  combineLocalDateTime,
+  defaultScheduledAt,
+  recurrenceToCron,
+  splitLocalDateTime,
+  type RecurrenceDraft,
+} from "./recurrence-model";
+import {
+  RecurrenceTimingField,
+  OneShotTimingField,
+  defaultRecurrence,
+  isScheduledInPast,
+} from "./timing-fields";
+import {
   Button,
   Field,
   FormInput,
@@ -25,7 +38,6 @@ import type { Tokens } from "./ui/tokens";
 type AssignMode = "agent" | "pipeline";
 type AgentSource = "existing" | "create";
 type Timing = "immediate" | "manual" | "scheduled" | "recurring";
-type CadenceKind = "every" | "cron";
 
 function prefillMessage(task: BoardTask): string {
   const lines = [`# ${task.displayId} ${task.title}`];
@@ -35,14 +47,6 @@ function prefillMessage(task: BoardTask): string {
     for (const item of task.acceptanceCriteria) lines.push(`- ${item}`);
   }
   return lines.join("\n");
-}
-
-function defaultScheduledAt(): string {
-  const at = new Date(Date.now() + 60 * 60 * 1000);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(
-    at.getHours(),
-  )}:${pad(at.getMinutes())}`;
 }
 
 export function AssignTaskSheet({
@@ -79,10 +83,11 @@ export function AssignTaskSheet({
   const [modeId, setModeId] = useState("");
   const [message, setMessage] = useState("");
   const [timing, setTiming] = useState<Timing>("immediate");
-  const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt);
-  const [cadenceKind, setCadenceKind] = useState<CadenceKind>("every");
-  const [everyMinutes, setEveryMinutes] = useState("60");
-  const [cronExpression, setCronExpression] = useState("0 9 * * *");
+  const [scheduledAt, setScheduledAt] = useState(() =>
+    defaultScheduledAt(new Date()),
+  );
+  const [recurrence, setRecurrence] =
+    useState<RecurrenceDraft>(defaultRecurrence);
   const [data, setData] = useState<CandidatesResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -92,9 +97,8 @@ export function AssignTaskSheet({
     if (!visible || !task) return;
     setMode("agent");
     setTiming("immediate");
-    setScheduledAt(defaultScheduledAt());
-    setEveryMinutes("60");
-    setCronExpression("0 9 * * *");
+    setScheduledAt(defaultScheduledAt(new Date()));
+    setRecurrence(defaultRecurrence());
     setError(null);
     setMessage(prefillMessage(task));
     setProvider(
@@ -225,6 +229,8 @@ export function AssignTaskSheet({
           : timing === "scheduled"
             ? "定时执行"
             : "保存循环";
+  const timingInvalid =
+    timing === "scheduled" && isScheduledInPast(scheduledAt);
 
   const submit = async () => {
     if (!task) return;
@@ -246,6 +252,10 @@ export function AssignTaskSheet({
     }
     if (agentSource === "create" && !selectedProfile && !provider.trim()) {
       setError("请填写 Provider");
+      return;
+    }
+    if (timingInvalid) {
+      setError("定时执行时间已过去，请选择未来的时间");
       return;
     }
     setSubmitting(true);
@@ -282,30 +292,26 @@ export function AssignTaskSheet({
         throw new Error(`${assigned.error.code}: ${assigned.error.message}`);
       let updated = assigned.value.task;
       if (timing === "scheduled" || timing === "recurring") {
-        const runAt = new Date(scheduledAt);
-        if (timing === "scheduled" && Number.isNaN(runAt.getTime())) {
-          throw new Error("执行时间格式无效，请使用 YYYY-MM-DDTHH:mm");
+        const [dateValue, timeValue] = splitLocalDateTime(scheduledAt);
+        const runAt = combineLocalDateTime(dateValue, timeValue);
+        if (timing === "scheduled" && !runAt) {
+          throw new Error("请选择有效的日期和时间");
         }
-        const minutes = Number(everyMinutes);
-        if (
-          timing === "recurring" &&
-          cadenceKind === "every" &&
-          (!Number.isFinite(minutes) || minutes <= 0)
-        ) {
-          throw new Error("循环间隔必须是正数分钟");
+        if (timing === "scheduled" && runAt && isScheduledInPast(scheduledAt)) {
+          throw new Error("定时执行时间已过去，请选择未来的时间");
         }
         const scheduled = await schedule({
           taskId: task.id,
           expectedRevision: updated.revision,
           trigger:
             timing === "scheduled"
-              ? { kind: "scheduled", runAt: runAt.toISOString() }
+              ? { kind: "scheduled", runAt: runAt!.toISOString() }
               : {
                   kind: "recurring",
-                  cadence:
-                    cadenceKind === "every"
-                      ? { type: "every", everyMs: Math.round(minutes * 60_000) }
-                      : { type: "cron", expression: cronExpression.trim() },
+                  cadence: {
+                    type: "cron",
+                    expression: recurrenceToCron(recurrence),
+                  },
                   session: "new",
                 },
         });
@@ -351,7 +357,7 @@ export function AssignTaskSheet({
             variant="default"
             size={compact ? "md" : "sm"}
             onPress={() => void submit()}
-            disabled={submitting || loading}
+            disabled={submitting || loading || timingInvalid}
             testID="assign-task-submit"
             tokens={tokens}
           >
@@ -544,46 +550,23 @@ export function AssignTaskSheet({
           </Hint>
         ) : null}
         {timing === "scheduled" ? (
-          <Field label="执行时间（YYYY-MM-DDTHH:mm）" tokens={tokens}>
-            <FormInput
-              value={scheduledAt}
-              onChangeText={setScheduledAt}
-              tokens={tokens}
-              testID="assign-scheduled-at"
-            />
-          </Field>
+          <OneShotTimingField
+            scheduledAt={scheduledAt}
+            onChange={setScheduledAt}
+            tokens={tokens}
+            compact={compact}
+            disabled={submitting}
+          />
         ) : null}
         {timing === "recurring" ? (
           <>
-            <Field label="循环方式" tokens={tokens}>
-              <SegmentedControl
-                options={[
-                  { value: "every", label: "固定间隔" },
-                  { value: "cron", label: "Cron" },
-                ]}
-                value={cadenceKind}
-                onValueChange={(value) => setCadenceKind(value as CadenceKind)}
-                tokens={tokens}
-                size={compact ? "md" : "sm"}
-              />
-            </Field>
-            {cadenceKind === "every" ? (
-              <Field label="间隔（分钟）" tokens={tokens}>
-                <FormInput
-                  value={everyMinutes}
-                  onChangeText={setEveryMinutes}
-                  tokens={tokens}
-                />
-              </Field>
-            ) : (
-              <Field label="Cron 表达式" tokens={tokens}>
-                <FormInput
-                  value={cronExpression}
-                  onChangeText={setCronExpression}
-                  tokens={tokens}
-                />
-              </Field>
-            )}
+            <RecurrenceTimingField
+              value={recurrence}
+              onChange={setRecurrence}
+              tokens={tokens}
+              compact={compact}
+              disabled={submitting}
+            />
             <Hint tokens={tokens}>
               每轮都会创建一个独立任务，走完整的执行与验收流程。
             </Hint>

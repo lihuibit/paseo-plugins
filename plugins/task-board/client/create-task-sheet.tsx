@@ -250,7 +250,7 @@ export function CreateTaskSheet({
           active={kind === "task-planning"}
           tokens={tokens}
           testID="task-kind-pill"
-          onPress={() =>
+          onPress={(anchor) =>
             openMenu({
               title: "类型",
               options: [
@@ -258,6 +258,7 @@ export function CreateTaskSheet({
                 { value: "task-planning", label: "规划任务" },
               ],
               selected: kind,
+              anchor,
               onSelect: (value) => {
                 const next = value as BoardTaskKind;
                 setKind(next);
@@ -273,11 +274,12 @@ export function CreateTaskSheet({
           active={parentId !== null}
           tokens={tokens}
           testID="task-parent-pill"
-          onPress={() =>
+          onPress={(anchor) =>
             openMenu({
               title: "父任务",
               options: parentOptions,
               selected: parentId ?? "",
+              anchor,
               onSelect: (value) => setParentId(value || null),
             })
           }
@@ -287,7 +289,7 @@ export function CreateTaskSheet({
           active={status !== "planning"}
           tokens={tokens}
           testID="task-status-pill"
-          onPress={() =>
+          onPress={(anchor) =>
             openMenu({
               title: "状态",
               options: STATUSES.map((value) => ({
@@ -295,6 +297,7 @@ export function CreateTaskSheet({
                 label: BOARD_STATUS_LABELS[value],
               })),
               selected: status,
+              anchor,
               onSelect: (value) => setStatus(value as BoardStatus),
             })
           }
@@ -306,7 +309,7 @@ export function CreateTaskSheet({
           active={priority !== "none"}
           tokens={tokens}
           testID="task-priority-pill"
-          onPress={() =>
+          onPress={(anchor) =>
             openMenu({
               title: "优先级",
               options: PRIORITIES.map((value) => ({
@@ -314,6 +317,7 @@ export function CreateTaskSheet({
                 label: BOARD_PRIORITY_LABELS[value],
               })),
               selected: priority,
+              anchor,
               onSelect: (value) => setPriority(value as BoardPriority),
             })
           }

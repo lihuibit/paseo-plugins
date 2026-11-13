@@ -11,6 +11,7 @@
     "client/",
     "server/",
     "shared/",
+    "skills/",
     "README.md"
   ],
   "scripts": {

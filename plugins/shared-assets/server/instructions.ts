@@ -339,6 +339,89 @@ export async function setInstructionsEnabled(input: {
   return { canonical: canonicalPath, targets: status.targets, kept };
 }
 
+/**
+ * Associate an existing local `.agentstorm/AGENTS.md` with the shared one.
+ *
+ * `preserve-local` keeps the local file and only records the shared revision as
+ * the baseline, so the difference reads as an unpublished local change.
+ * `use-remote` replaces the canonical file with the shared content.
+ */
+export async function adoptInstructions(input: {
+  projectId: string;
+  workspaceDirectory: string;
+  provider: string;
+  mode: "preserve-local" | "use-remote";
+}): Promise<{ canonical: string }> {
+  const shared = await readShared(repoDir(input.projectId));
+  if (!shared) {
+    throw new PluginError(
+      "E_ASSET_NOT_FOUND",
+      "The shared repository has no root AGENTS.md",
+    );
+  }
+  const providers = expandProvider(input.provider);
+  if (providers.length === 0) {
+    throw new PluginError(
+      "E_PROVIDER_UNSUPPORTED",
+      `Unknown provider: ${input.provider}`,
+    );
+  }
+  const canonicalPath = join(
+    input.workspaceDirectory,
+    ".agentstorm",
+    "AGENTS.md",
+  );
+  await resolveInside(input.workspaceDirectory, canonicalPath);
+  if (input.mode === "use-remote" || !(await fileExists(canonicalPath))) {
+    await atomicWriteFile(canonicalPath, shared.content);
+  }
+
+  const config = await readConfig();
+  const stored = (config.instructions[input.projectId] ??= {
+    canonical: null,
+    providers: [],
+  });
+  stored.canonical = {
+    targetPath: canonicalPath,
+    baselineDigest: shared.digest,
+    updatedAt: new Date().toISOString(),
+  };
+  for (const provider of providers) {
+    const entrypoint = INSTRUCTION_ENTRYPOINTS[provider];
+    if (!entrypoint) {
+      throw new PluginError(
+        "E_PROVIDER_UNSUPPORTED",
+        `Provider ${provider} has no verified instruction entrypoint`,
+      );
+    }
+    const targetPath = join(input.workspaceDirectory, entrypoint);
+    const index = stored.providers.findIndex(
+      (entry) => entry.provider === provider,
+    );
+    const record = index >= 0 ? stored.providers[index] : undefined;
+    const entry = await createProviderEntry(
+      provider,
+      targetPath,
+      canonicalPath,
+      shared.content,
+      record,
+    );
+    entry.updatedAt = new Date().toISOString();
+    if (index >= 0) stored.providers[index] = entry;
+    else stored.providers.push(entry);
+  }
+  await recordBaselineFromFile({
+    workspaceDirectory: input.workspaceDirectory,
+    assetId: "prompt",
+    kind: "prompt",
+    provider: null,
+    relativePath: "AGENTS.md",
+    sourcePath: join(repoDir(input.projectId), "AGENTS.md"),
+  });
+  await writeConfig(config);
+  return { canonical: canonicalPath };
+}
+
 export async function removeInstructionProjections(
   projectId: string,
   workspaceDirectory: string,

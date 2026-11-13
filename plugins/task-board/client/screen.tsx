@@ -30,6 +30,7 @@ import { AssignTaskSheet } from "./assign-task-sheet";
 import { CreateTaskSheet } from "./create-task-sheet";
 import { SettingsSheet } from "./settings-sheet";
 import { TaskDetail } from "./task-detail";
+import { describeTaskSchedule } from "./task-schedule-label";
 import {
   Alert,
   Button,
@@ -41,6 +42,7 @@ import {
   StatusDot,
   StatusMenuTrigger,
   SwitchControl,
+  type MenuAnchor,
   useOverlayMenu,
 } from "./ui/components";
 import { createTokens, type Tokens } from "./ui/tokens";
@@ -259,7 +261,7 @@ function TaskBoardContent({
   );
 
   const openStatusMenu = useCallback(
-    (task: BoardTask) => {
+    (task: BoardTask, anchor?: MenuAnchor) => {
       openMenu({
         title: `切换 ${task.displayId} 状态`,
         options: BOARD_STATUSES.map((status) => ({
@@ -267,6 +269,7 @@ function TaskBoardContent({
           label: BOARD_STATUS_LABELS[status],
         })),
         selected: task.status,
+        anchor,
         onSelect: (value) => void changeStatus(task, value as BoardStatus),
       });
     },
@@ -603,11 +606,12 @@ function TaskBoard({
   onCreate: (status: BoardStatus, parentId?: string | null) => void;
   onOpenTask: (taskId: string) => void;
   onAssign: (task: BoardTask) => void;
-  onStatus: (task: BoardTask) => void;
+  onStatus: (task: BoardTask, anchor?: MenuAnchor) => void;
   onRun: (task: BoardTask) => void;
   onOpenExecution: (task: BoardTask) => void;
 }) {
   const { width: windowWidth } = useWindowDimensions();
+  const { closeMenu } = useOverlayMenu();
   const [boardHeight, setBoardHeight] = useState(0);
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     setBoardHeight(event.nativeEvent.layout.height);
@@ -661,6 +665,8 @@ function TaskBoard({
   return (
     <ScrollView
       horizontal
+      onScroll={closeMenu}
+      scrollEventThrottle={16}
       showsHorizontalScrollIndicator={!compact}
       style={
         compact
@@ -722,10 +728,11 @@ function TaskColumn({
   onCreate: (status: BoardStatus, parentId?: string | null) => void;
   onOpenTask: (taskId: string) => void;
   onAssign: (task: BoardTask) => void;
-  onStatus: (task: BoardTask) => void;
+  onStatus: (task: BoardTask, anchor?: MenuAnchor) => void;
   onRun: (task: BoardTask) => void;
   onOpenExecution: (task: BoardTask) => void;
 }) {
+  const { closeMenu } = useOverlayMenu();
   const items = rows.map((task) => (
     <TaskCard
       key={task.id}
@@ -797,6 +804,8 @@ function TaskColumn({
       ) : (
         <ScrollView
           style={{ flex: 1, minHeight: 0 }}
+          onScroll={closeMenu}
+          scrollEventThrottle={16}
           contentContainerStyle={{
             gap: tokens.spacing[2],
             padding: tokens.spacing[2],
@@ -840,7 +849,7 @@ function TaskCard({
   tokens: Tokens;
   onOpenTask: (taskId: string) => void;
   onAssign: (task: BoardTask) => void;
-  onStatus: (task: BoardTask) => void;
+  onStatus: (task: BoardTask, anchor?: MenuAnchor) => void;
   onRun: (task: BoardTask) => void;
   onOpenExecution: (task: BoardTask) => void;
 }) {
@@ -857,6 +866,7 @@ function TaskCard({
   const blockLabel = task.blockReason
     ? BLOCK_REASON_LABELS[task.blockReason]
     : null;
+  const schedule = describeTaskSchedule(task);
   const canAssign = !task.execution && !task.assignment;
   const canStart =
     !task.execution && !!task.assignment && task.status === "todo";
@@ -982,6 +992,46 @@ function TaskCard({
               >
                 {task.blockDetail}
               </Text>
+            ) : null}
+          </View>
+        ) : null}
+        {schedule ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: tokens.spacing[1],
+              minWidth: 0,
+            }}
+          >
+            <Icon
+              name="Clock"
+              size={11}
+              color={tokens.colors.foregroundMuted}
+            />
+            <Text
+              numberOfLines={1}
+              style={{
+                flexShrink: 1,
+                color: tokens.colors.foregroundMuted,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              {schedule.cadence}
+            </Text>
+            {schedule.nextRun ? (
+              <>
+                <View style={{ flex: 1 }} />
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: tokens.colors.foregroundExtraMuted,
+                    fontSize: tokens.fontSize.sm,
+                  }}
+                >
+                  {schedule.nextRun}
+                </Text>
+              </>
             ) : null}
           </View>
         ) : null}
@@ -1152,7 +1202,7 @@ function TaskCard({
         ) : null}
         <StatusMenuTrigger
           status={task.status}
-          onPress={() => onStatus(task)}
+          onPress={(anchor) => onStatus(task, anchor)}
           tokens={tokens}
           testID={`task-status-${task.displayId}`}
         />
@@ -1185,16 +1235,19 @@ function TaskList({
   onToggleCollapsed: (status: BoardStatus) => void;
   onOpenTask: (taskId: string) => void;
   onAssign: (task: BoardTask) => void;
-  onStatus: (task: BoardTask) => void;
+  onStatus: (task: BoardTask, anchor?: MenuAnchor) => void;
   onRun: (task: BoardTask) => void;
   onOpenExecution: (task: BoardTask) => void;
   onCreate: (status: BoardStatus, parentId?: string | null) => void;
 }) {
+  const { closeMenu } = useOverlayMenu();
   if (loading && tasks.length === 0)
     return <Hint tokens={tokens}>正在读取任务…</Hint>;
   return (
     <ScrollView
       style={{ flex: 1, minHeight: 0 }}
+      onScroll={closeMenu}
+      scrollEventThrottle={16}
       contentContainerStyle={{
         gap: tokens.spacing[4],
         paddingBottom: tokens.spacing[4],
@@ -1321,7 +1374,7 @@ function TaskListRow({
   compact: boolean;
   onOpenTask: (taskId: string) => void;
   onAssign: (task: BoardTask) => void;
-  onStatus: (task: BoardTask) => void;
+  onStatus: (task: BoardTask, anchor?: MenuAnchor) => void;
   onRun: (task: BoardTask) => void;
   onOpenExecution: (task: BoardTask) => void;
 }) {
@@ -1332,6 +1385,7 @@ function TaskListRow({
   const canAssign = !task.execution && !task.assignment;
   const canStart =
     !task.execution && !!task.assignment && task.status === "todo";
+  const schedule = describeTaskSchedule(task);
   const runner = task.execution
     ? [task.execution.provider, task.execution.model]
         .filter(Boolean)
@@ -1340,6 +1394,9 @@ function TaskListRow({
       ? "已分配 · 待执行"
       : null;
   const meta = [
+    schedule
+      ? `${schedule.cadence}${schedule.nextRun ? ` · ${schedule.nextRun}` : ""}`
+      : null,
     runner,
     parent ? `父 ${parent.displayId}` : null,
     children.length > 0
@@ -1485,7 +1542,7 @@ function TaskListRow({
         ) : null}
         <StatusMenuTrigger
           status={task.status}
-          onPress={() => onStatus(task)}
+          onPress={(anchor) => onStatus(task, anchor)}
           tokens={tokens}
         />
       </View>

@@ -19,7 +19,7 @@ const evidence = { steps: [], assertions: {} };
 const password = (await readFile(`${home}/local-credential`, "utf8")).trim();
 const client = new DaemonClient({
   url: `ws://127.0.0.1:${port}/ws`,
-  password,
+  localCredential: () => password,
   clientId: "shared-assets-e2e",
   reconnect: { enabled: false },
 });
@@ -112,20 +112,28 @@ async function main() {
     workspaceId,
   });
   evidence.assertions.skillsBefore = skillsBefore;
-  for (const assetId of ["skill:project/code-review", "skill:global/writing"]) {
-    await call("shared-assets.skills.set-enabled", {
-      projectId,
-      workspaceId,
-      assetId,
-      provider: "both",
-      enabled: true,
-    });
-  }
+  await call("shared-assets.skills.set-enabled", {
+    projectId,
+    workspaceId,
+    assetId: "skill:project/code-review",
+    provider: "both",
+    enabled: true,
+  });
   evidence.assertions.skillFiles = {
     codex: await exists(join(demo, ".codex/skills/code-review/SKILL.md")),
     claude: await exists(join(demo, ".claude/skills/code-review/SKILL.md")),
     writingCodex: await exists(join(demo, ".codex/skills/writing/SKILL.md")),
   };
+  if (evidence.assertions.skillFiles.writingCodex !== false) {
+    throw new Error("skills/global must be ignored");
+  }
+  if (
+    !evidence.assertions.assets.every(
+      (asset) => !asset.assetId.includes("global"),
+    )
+  ) {
+    throw new Error("assets.list must not include skills/global");
+  }
   step("skills enabled", evidence.assertions.skillFiles);
 
   const instructions = await call("shared-assets.instructions.status", {

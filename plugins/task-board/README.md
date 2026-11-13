@@ -96,6 +96,26 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 `Bash(paseo-board:*)` 示例见
 [`../../packages/board-cli/README.md`](../../packages/board-cli/README.md)。
 
+### 外部 Agent Skill
+
+外部 Agent（Claude Code、Codex 等）可以安装仓库内的 Skill，让 Agent 知道何时
+以及如何调用 `paseo-board`。Skill 只面向外部 shell Agent；Paseo 启动的规划
+Agent 和 worker 已经有注入的 `board_*` 工具，不应使用这个 Skill。
+
+```bash
+# Claude Code
+cp -r skills/paseo-board ~/.claude/skills/
+
+# 或 Codex
+cp -r skills/paseo-board ~/.codex/skills/
+```
+
+安装后确认 `paseo-board` 在 `PATH` 上（见本文「外部 CLI」和
+[`../../packages/board-cli/README.md`](../../packages/board-cli/README.md)），
+并设置 `PASEO_BOARD_URL` / `PASEO_BOARD_PASSWORD`。Skill 内容见
+[`skills/paseo-board/SKILL.md`](skills/paseo-board/SKILL.md)，包含命令表、
+常用配方、`status`/`logs` 语义、退出码和安全限制。
+
 ## Agent 归属与 hooks
 
 - 创建 Agent 时写入 label：`agentstorm.board=1`、`agentstorm.task-id=<btask>`、
@@ -120,6 +140,8 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 
 ## 定时与 recurring
 
+- 分配表单不接收自由文本日期或 cron：定时用日期 + 时间下拉，循环用
+  「每天 / 每周 / 每月 / 工作日 / 间隔」形状，并实时显示下次执行。
 - `scheduled`：到点启动一次，`nextRunAt=null`；失败把 `nextRunAt` 推后 60 秒并写
   `blocked(agent_error)`。
 - `recurring`：父卡保持 `todo`，每次触发派生一张子卡（`parentTaskId`）并启动；
@@ -143,7 +165,8 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 - `delete` 先 stop 再 archive，子任务变顶层，并写 `deleted.jsonl`。
 - `unassign` 先 stop，再清空执行体/assignment/trigger，回 `planning`（会话保留）。
 - `cancel` 取消 turn、归档 Agent，卡片 `cancelled` + `executionArchive=final`；不提供
-  unarchive。`done` 只标 `restorable`。
+  unarchive。`done`、`cancelled`、`delete` 都会归档 Agent 并从 `agentIndex` 解绑；
+  归档失败只记日志，不阻断卡片状态。
 - `migrate-legacy` 默认 dry-run；只读源文件并记录 sha256。`id` 冲突会重映射，
   未知状态回落 `planning`，`pipeline` 执行体丢弃，Agent 执行体仅在 Paseo 仍存在时保留。
   同一 `sourceDigest` 重复执行返回 no-op。

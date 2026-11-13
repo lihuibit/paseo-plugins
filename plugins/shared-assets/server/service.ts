@@ -7,6 +7,13 @@ import type {
 import type { RpcInput } from "@getpaseo/plugin";
 import { fail, ok, PluginError, type RpcEnvelope } from "../shared/core/errors";
 import type { Binding, ProjectSummary } from "../shared/core/types";
+import type {
+  DriftItem,
+  ProjectAttention,
+  ProjectAttentionItem,
+  ProviderId,
+  WorkspaceSummary,
+} from "../shared/core/types";
 import {
   assetsListRpc,
   assetReadRpc,
@@ -29,6 +36,10 @@ import {
   providersListRpc,
   publishCommitRpc,
   publishPreviewRpc,
+  relationshipsAdoptRpc,
+  relationshipsBatchUnlinkRpc,
+  relationshipsListRpc,
+  relationshipsUnlinkRpc,
   skillsListRpc,
   skillsSetEnabledRpc,
   statusRpc,
@@ -92,6 +103,11 @@ import { migrateLegacy } from "./migration";
 import { listProviderStatuses } from "./providers";
 import { resolveAssetForWorkspace } from "./asset-files";
 import { clearBaselines } from "./baseline";
+import {
+  adoptRelationship,
+  listRelationships,
+  unlinkRelationship,
+} from "./relationships";
 
 async function logRpc(message: string): Promise<void> {
   try {
@@ -173,9 +189,18 @@ async function projects(
     listWorkspaces(paseo),
   ]);
   const config = await readConfig();
-  return paseoProjects
+  const summaries: ProjectSummary[] = paseoProjects
     .map((project) => {
       const binding = config.bindings[project.projectId];
+      const workspacesForProject = workspaces
+        .filter((workspace) => workspace.projectId === project.projectId)
+        .map(workspaceSummary)
+        .sort((a, b) => {
+          if (a.background !== b.background) return a.background ? 1 : -1;
+          if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      const workspace = activeWorkspace(workspacesForProject);
       return {
         projectId: project.projectId,
         displayName: project.projectCustomName ?? project.projectDisplayName,
@@ -183,17 +208,82 @@ async function projects(
         bound: binding !== undefined,
         libraryId: binding?.libraryId ?? null,
         syncMode: binding?.syncMode ?? null,
-        workspaces: workspaces
-          .filter((workspace) => workspace.projectId === project.projectId)
-          .map(workspaceSummary)
-          .sort((a, b) => {
-            if (a.background !== b.background) return a.background ? 1 : -1;
-            if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
-            return a.name.localeCompare(b.name);
-          }),
+        workspaces: workspacesForProject,
+        workspaceId: workspace?.workspaceId ?? null,
+        workspaceName: workspace?.name ?? null,
+        workspaceDirectory: workspace?.directory ?? null,
+        repoUrl: binding?.repoUrl ?? null,
+        branch: binding?.branch ?? null,
+        state: binding?.state ?? null,
+        attention: emptyAttention(),
       };
     })
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+  const enriched = await Promise.all(
+    summaries.map(async (summary) => {
+      const binding = config.bindings[summary.projectId];
+      if (!binding) return summary;
+      const next = { ...summary, attention: emptyAttention() };
+      try {
+        const current = await status(summary.projectId);
+        next.state = current.binding.state;
+      } catch {
+        // A missing checkout keeps the stored state; the row still renders.
+      }
+      if (!summary.workspaceDirectory) return next;
+      try {
+        const drift = await listDrift(
+          summary.projectId,
+          summary.workspaceDirectory,
+          true,
+        );
+        next.attention = attentionFromDrift(drift);
+      } catch {
+        // Drift is advisory; an unreadable checkout must not hide the project.
+      }
+      return next;
+    }),
+  );
+  return enriched;
+}
+
+function activeWorkspace(
+  workspaces: readonly WorkspaceSummary[],
+): WorkspaceSummary | null {
+  return (
+    workspaces.find(
+      (workspace) => !workspace.background && workspace.kind === "directory",
+    ) ??
+    workspaces.find((workspace) => !workspace.background) ??
+    workspaces[0] ??
+    null
+  );
+}
+
+function emptyAttention(): ProjectAttention {
+  return { items: [], conflicts: 0, unpublished: 0, ignored: 0 };
+}
+
+function attentionFromDrift(drift: readonly DriftItem[]): ProjectAttention {
+  const items: ProjectAttentionItem[] = drift
+    .filter((item) => item.status !== "synced")
+    .map((item) => ({
+      kind: item.kind,
+      provider: item.provider,
+      scope: item.scope,
+      name: item.name,
+      reason: item.status,
+      ignored: item.ignored,
+    }));
+  const active = items.filter((item) => !item.ignored);
+  return {
+    items,
+    conflicts: active.filter((item) => item.reason === "diverged").length,
+    unpublished: active.filter((item) => item.reason === "unpublished-local")
+      .length,
+    ignored: items.filter((item) => item.ignored).length,
+  };
 }
 
 async function configure(
@@ -564,6 +654,101 @@ export function registerHandlers(server: PluginServerContext): void {
           input.workspaceId,
         );
         return setSkillEnabled({ ...input, workspaceDirectory: workspace });
+      });
+    }),
+  );
+
+  server.handle(relationshipsListRpc, async (input, context) =>
+    respond(async () => {
+      await requireBinding(input.projectId);
+      const workspace = await workspaceDirectory(
+        context.paseo,
+        input.projectId,
+        input.workspaceId,
+      );
+      return listRelationships({
+        projectId: input.projectId,
+        workspaceDirectory: workspace,
+        kind: input.kind,
+        provider: (input.provider ?? null) as ProviderId | null,
+      });
+    }),
+  );
+
+  server.handle(relationshipsAdoptRpc, async (input, context) =>
+    respond(async () => {
+      await requireBinding(input.projectId);
+      return withProjectLock(input.projectId, async () => {
+        const workspace = await workspaceDirectory(
+          context.paseo,
+          input.projectId,
+          input.workspaceId,
+        );
+        return adoptRelationship({
+          projectId: input.projectId,
+          workspaceDirectory: workspace,
+          kind: input.kind,
+          provider: (input.provider ?? null) as ProviderId | null,
+          assetId: input.assetId,
+          localAssetId: input.localAssetId,
+          mode: input.mode,
+        });
+      });
+    }),
+  );
+
+  server.handle(relationshipsUnlinkRpc, async (input, context) =>
+    respond(async () => {
+      await requireBinding(input.projectId);
+      return withProjectLock(input.projectId, async () => {
+        const workspace = await workspaceDirectory(
+          context.paseo,
+          input.projectId,
+          input.workspaceId,
+        );
+        return unlinkRelationship({
+          projectId: input.projectId,
+          workspaceDirectory: workspace,
+          kind: input.kind,
+          provider: (input.provider ?? null) as ProviderId | null,
+          assetId: input.assetId,
+          deleteLocal: input.deleteLocal,
+        });
+      });
+    }),
+  );
+
+  server.handle(relationshipsBatchUnlinkRpc, async (input, context) =>
+    respond(async () => {
+      await requireBinding(input.projectId);
+      return withProjectLock(input.projectId, async () => {
+        const workspace = await workspaceDirectory(
+          context.paseo,
+          input.projectId,
+          input.workspaceId,
+        );
+        const items = [];
+        const failed = [];
+        for (const assetId of input.assetIds) {
+          try {
+            items.push(
+              await unlinkRelationship({
+                projectId: input.projectId,
+                workspaceDirectory: workspace,
+                kind: input.kind,
+                provider: (input.provider ?? null) as ProviderId | null,
+                assetId,
+                deleteLocal: input.deleteLocal,
+              }),
+            );
+          } catch (error) {
+            failed.push({
+              assetId,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        return { items, failed };
       });
     }),
   );

@@ -54,10 +54,11 @@ describe("repository paths", () => {
   });
 
   it("round-trips asset ids", () => {
-    expect(parseSkillAssetId(assetIdForSkill("global", "review"))).toEqual({
-      scope: "global",
+    expect(parseSkillAssetId(assetIdForSkill("project", "review"))).toEqual({
+      scope: "project",
       name: "review",
     });
+    expect(parseSkillAssetId("skill:global/review")).toBeNull();
     expect(parseKnowledgeAssetId(knowledgeAssetId("deploy.md"))).toBe("deploy");
     expect(parseDocAssetId(docAssetId("design"))).toBe("design");
     expect(parseSkillAssetId("knowledge/a.md")).toBeNull();

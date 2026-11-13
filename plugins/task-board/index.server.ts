@@ -215,7 +215,12 @@ export default function contribute(server: PluginServerContext) {
         }));
       }
       return respond(async () => ({
-        task: await service.setStatus(taskId, status, expectedRevision),
+        task: await service.setStatus(
+          context.paseo,
+          taskId,
+          status,
+          expectedRevision,
+        ),
       }));
     },
   );
@@ -278,7 +283,12 @@ export default function contribute(server: PluginServerContext) {
     await ensureReady(context.paseo);
     return respond(async () => {
       const revision = expectedRevision ?? (await service.get(taskId)).revision;
-      const task = await service.setStatus(taskId, "done", revision);
+      const task = await service.setStatus(
+        context.paseo,
+        taskId,
+        "done",
+        revision,
+      );
       return { task: summarizeTask(task, null) };
     });
   });

@@ -108,50 +108,49 @@ export async function scanSkills(checkout: string): Promise<{
 }> {
   const assets: AssetSummary[] = [];
   const warnings: string[] = [];
-  for (const scope of ["project", "global"] as const) {
-    const root = join(checkout, "skills", scope);
-    if (!(await optionalDirectory(root))) continue;
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory()) continue;
-      const path = `skills/${scope}/${entry.name}`;
-      const skillRoot = join(checkout, path);
-      if ((await lstat(skillRoot).catch(() => null))?.isSymbolicLink()) {
-        warnings.push(`${path}: symlink skipped`);
-        continue;
-      }
-      const skillFile = join(skillRoot, "SKILL.md");
-      let markdown: string;
-      try {
-        markdown = await readFileLimited(skillFile, MAX_FILE_BYTES).then(
-          (buffer) => buffer.toString("utf8"),
-        );
-      } catch {
-        warnings.push(`${path}: SKILL.md is missing`);
-        continue;
-      }
-      const frontmatter = parseSkillFrontmatter(markdown);
-      if (frontmatter.name && frontmatter.name !== entry.name) {
-        warnings.push(
-          `${path}: frontmatter name "${frontmatter.name}" does not match the directory`,
-        );
-      }
-      const files = await directoryFiles(skillRoot);
-      assets.push(
-        summarize(
-          {
-            assetId: assetIdForSkill(scope, entry.name),
-            kind: "skill",
-            name: entry.name,
-            scope,
-            description: frontmatter.description,
-            path,
-            warnings: [],
-          },
-          files,
-        ),
+  const scope = "project" as const;
+  const root = join(checkout, "skills", scope);
+  if (!(await optionalDirectory(root))) return { assets, warnings };
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isDirectory()) continue;
+    const path = `skills/${scope}/${entry.name}`;
+    const skillRoot = join(checkout, path);
+    if ((await lstat(skillRoot).catch(() => null))?.isSymbolicLink()) {
+      warnings.push(`${path}: symlink skipped`);
+      continue;
+    }
+    const skillFile = join(skillRoot, "SKILL.md");
+    let markdown: string;
+    try {
+      markdown = await readFileLimited(skillFile, MAX_FILE_BYTES).then(
+        (buffer) => buffer.toString("utf8"),
+      );
+    } catch {
+      warnings.push(`${path}: SKILL.md is missing`);
+      continue;
+    }
+    const frontmatter = parseSkillFrontmatter(markdown);
+    if (frontmatter.name && frontmatter.name !== entry.name) {
+      warnings.push(
+        `${path}: frontmatter name "${frontmatter.name}" does not match the directory`,
       );
     }
+    const files = await directoryFiles(skillRoot);
+    assets.push(
+      summarize(
+        {
+          assetId: assetIdForSkill(scope, entry.name),
+          kind: "skill",
+          name: entry.name,
+          scope,
+          description: frontmatter.description,
+          path,
+          warnings: [],
+        },
+        files,
+      ),
+    );
   }
   return { assets, warnings };
 }

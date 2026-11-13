@@ -197,6 +197,56 @@ export class TaskBoardService {
     }
   }
 
+  /**
+   * Archive the agent bound to a finished card.
+   *
+   * Archiving is best effort: a missing or already-archived agent is success,
+   * and any host error is logged without changing the card state. The agent
+   * index is always unbound so a restart cannot resurrect the binding.
+   */
+  private async archiveAgent(
+    paseo: PaseoApi,
+    agentId: string,
+    reason: string,
+  ): Promise<void> {
+    if (this.archivingAgents.has(agentId)) return;
+    this.archivingAgents.add(agentId);
+    try {
+      const handle = paseo.agents.ref(agentId);
+      await handle.reload().catch(() => undefined);
+      if (handle.archivedAt) {
+        console.log(
+          `[agentstorm-task-board] agent ${agentId} already archived (${reason})`,
+        );
+        return;
+      }
+      await handle.archive();
+      console.log(
+        `[agentstorm-task-board] archived agent ${agentId} (${reason})`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not found|missing|archived/i.test(message)) {
+        console.log(
+          `[agentstorm-task-board] agent ${agentId} is gone; archive treated as success (${reason})`,
+        );
+      } else {
+        console.error(
+          `[agentstorm-task-board] could not archive ${agentId} (${reason})`,
+          error,
+        );
+      }
+    } finally {
+      this.archivingAgents.delete(agentId);
+      await this.index.unbind(agentId).catch((error: unknown) => {
+        console.error(
+          `[agentstorm-task-board] could not unbind ${agentId} from agentIndex`,
+          error,
+        );
+      });
+    }
+  }
+
   async list(input: ListInput): Promise<{
     tasks: BoardTask[];
     counts: Record<string, number>;
@@ -324,6 +374,7 @@ export class TaskBoardService {
   }
 
   async setStatus(
+    paseo: PaseoApi,
     taskId: string,
     status: BoardStatus,
     expectedRevision: number,
@@ -339,6 +390,10 @@ export class TaskBoardService {
       );
       return { document: outcome.document, result: outcome.task };
     });
+    if (task.status === "done" || task.status === "cancelled") {
+      const agentId = task.execution?.agentId;
+      if (agentId) await this.archiveAgent(paseo, agentId, task.status);
+    }
     await appendEvent({
       at: now,
       kind: "status_changed",
@@ -442,22 +497,7 @@ export class TaskBoardService {
       });
       const agentId = task.execution?.agentId;
       if (agentId) {
-        this.archivingAgents.add(agentId);
-        try {
-          await paseo.agents
-            .ref(agentId)
-            .reload()
-            .catch(() => undefined);
-          await paseo.agents.ref(agentId).archive();
-        } catch (error) {
-          console.error(
-            `[agentstorm-task-board] could not archive ${agentId}`,
-            error,
-          );
-        } finally {
-          this.archivingAgents.delete(agentId);
-        }
-        await this.index.unbind(agentId);
+        await this.archiveAgent(paseo, agentId, "cancelled");
       }
       await appendEvent({
         at: now,
@@ -669,17 +709,8 @@ export class TaskBoardService {
     assertRevision(before, expectedRevision);
     const agentId = before.execution?.agentId;
     if (agentId) {
-      this.archivingAgents.add(agentId);
-      try {
-        await this.stop(paseo, taskId).catch(() => undefined);
-        await paseo.agents
-          .ref(agentId)
-          .archive()
-          .catch(() => undefined);
-      } finally {
-        this.archivingAgents.delete(agentId);
-      }
-      await this.index.unbind(agentId);
+      await this.stop(paseo, taskId).catch(() => undefined);
+      await this.archiveAgent(paseo, agentId, "deleted");
     }
     const current = await this.get(taskId);
     const now = new Date().toISOString();

@@ -19,6 +19,10 @@ import {
   updateRpc,
 } from "../shared/contracts";
 import {
+  describeTaskSchedule,
+  formatFullScheduleTime,
+} from "./task-schedule-label";
+import {
   Alert,
   Button,
   Field,
@@ -123,7 +127,7 @@ export function TaskDetail({
   const setHierarchy = useRpc(setHierarchyRpc);
   const unassign = useRpc(unassignRpc);
   const remove = useRpc(deleteRpc);
-  const { openMenu } = useOverlayMenu();
+  const { openMenu, closeMenu } = useOverlayMenu();
   const [title, setTitle] = useState(task.title);
   const [titleFocused, setTitleFocused] = useState(false);
   const [description, setDescription] = useState(task.description ?? "");
@@ -305,22 +309,15 @@ export function TaskDetail({
     (task.description?.length ?? 0) > 520 ||
     (task.description?.split("\n").length ?? 0) > 9;
 
+  const schedule = describeTaskSchedule(task);
   const scheduleLine =
-    task.trigger?.kind === "scheduled"
-      ? `执行时机：定时 ${formatTime(task.trigger.runAt)}`
-      : task.trigger?.kind === "recurring"
-        ? `执行时机：循环 ${
-            task.trigger.cadence.type === "every"
-              ? `每 ${Math.round(task.trigger.cadence.everyMs / 60_000)} 分钟`
-              : task.trigger.cadence.expression
-          }`
-        : task.trigger?.kind === "manual"
-          ? "执行时机：仅分配"
-          : null;
+    task.trigger?.kind === "manual" ? "执行时机：仅分配" : null;
 
   return (
     <ScrollView
       style={{ flex: 1 }}
+      onScroll={closeMenu}
+      scrollEventThrottle={16}
       contentContainerStyle={{
         gap: tokens.spacing[4],
         padding: tokens.spacing[4],
@@ -530,7 +527,7 @@ export function TaskDetail({
       </Text>
 
       <SectionLabel label="执行" tokens={tokens} />
-      {scheduleLine ? (
+      {schedule || scheduleLine ? (
         <View
           style={{
             gap: tokens.spacing[1],
@@ -545,26 +542,27 @@ export function TaskDetail({
               fontSize: tokens.fontSize.sm,
             }}
           >
-            {scheduleLine}
+            {schedule ? `执行时机：${schedule.cadence}` : scheduleLine}
           </Text>
-          {task.nextRunAt ? (
+          {schedule?.nextRun && task.nextRunAt ? (
             <Text
               style={{
                 color: tokens.colors.foregroundMuted,
                 fontSize: tokens.fontSize.sm,
               }}
             >
-              下次执行：{formatTime(task.nextRunAt)}
+              下次执行：{formatFullScheduleTime(task.nextRunAt)}
+              {schedule.countdown ? ` · ${schedule.countdown}` : ""}
             </Text>
           ) : null}
-          {task.runCount > 0 ? (
+          {schedule && schedule.runCount > 0 ? (
             <Text
               style={{
                 color: tokens.colors.foregroundMuted,
                 fontSize: tokens.fontSize.sm,
               }}
             >
-              已执行 {task.runCount} 次
+              已执行 {schedule.runCount} 次
             </Text>
           ) : null}
         </View>

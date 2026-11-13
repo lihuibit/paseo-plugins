@@ -77,6 +77,35 @@ export const ProjectSummarySchema = z.object({
       background: z.boolean(),
     }),
   ),
+  workspaceId: z.string().min(1).nullable(),
+  workspaceName: z.string().min(1).nullable(),
+  workspaceDirectory: z.string().min(1).nullable(),
+  repoUrl: z.string().min(1).nullable(),
+  branch: z.string().min(1).nullable(),
+  state: BindingStateSchema.nullable(),
+  attention: z.object({
+    items: z.array(
+      z.object({
+        kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+        provider: z.string().min(1).nullable(),
+        scope: z.literal("project").nullable(),
+        name: z.string().min(1),
+        reason: z.enum([
+          "synced",
+          "local-update",
+          "remote-update",
+          "diverged",
+          "remote-deleted",
+          "unpublished-local",
+          "missing",
+        ]),
+        ignored: z.boolean(),
+      }),
+    ),
+    conflicts: z.number().int().nonnegative(),
+    unpublished: z.number().int().nonnegative(),
+    ignored: z.number().int().nonnegative(),
+  }),
 });
 
 export const AssetFileSchema = z.object({
@@ -88,7 +117,7 @@ export const AssetSummarySchema = z.object({
   assetId: z.string().min(1),
   kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
   name: z.string().min(1),
-  scope: z.enum(["project", "global"]).nullable(),
+  scope: z.literal("project").nullable(),
   description: z.string().nullable(),
   path: z.string(),
   fileCount: z.number().int().nonnegative(),
@@ -372,7 +401,7 @@ export const DriftItemSchema = z.object({
   assetId: z.string().min(1),
   kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
   name: z.string().min(1),
-  scope: z.enum(["project", "global"]).nullable(),
+  scope: z.literal("project").nullable(),
   provider: z.string().nullable(),
   targetPath: z.string().min(1),
   status: DriftStatusSchema,
@@ -390,6 +419,130 @@ export const driftListRpc = defineRpc({
     })
     .strict(),
   output: envelope(z.array(DriftItemSchema)),
+});
+
+export const LocalAssetSummarySchema = z.object({
+  assetId: z.string().min(1),
+  kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+  name: z.string().min(1),
+  provider: z.string().min(1).nullable(),
+  path: z.string().min(1),
+  description: z.string().nullable(),
+  fileCount: z.number().int().nonnegative(),
+  totalBytes: z.number().int().nonnegative(),
+  warnings: z.array(z.string()),
+});
+
+export const AssetRelationshipRowSchema = z.object({
+  id: z.string().min(1),
+  relationship: z.enum(["linked", "candidate", "private", "shared-only"]),
+  shared: AssetSummarySchema.nullable(),
+  local: LocalAssetSummarySchema.nullable(),
+  syncStatus: DriftStatusSchema.nullable(),
+  driftFiles: z.number().int().nonnegative(),
+});
+
+export const RelationshipListResultSchema = z.object({
+  kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+  provider: z.string().min(1).nullable(),
+  rows: z.array(AssetRelationshipRowSchema),
+  ignored: z.array(
+    z.object({
+      assetId: z.string().min(1),
+      path: z.string().nullable(),
+      reason: z.string(),
+      ignoredAt: z.string(),
+    }),
+  ),
+  warnings: z.array(z.string()),
+});
+
+export const relationshipsListRpc = defineRpc({
+  name: "shared-assets.relationships.list",
+  input: z
+    .object({
+      projectId: z.string().min(1),
+      workspaceId: z.string().min(1),
+      kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+      provider: z.string().min(1).nullable().default(null),
+    })
+    .strict(),
+  output: envelope(RelationshipListResultSchema),
+});
+
+export const relationshipsAdoptRpc = defineRpc({
+  name: "shared-assets.relationships.adopt",
+  input: z
+    .object({
+      projectId: z.string().min(1),
+      workspaceId: z.string().min(1),
+      kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+      provider: z.string().min(1).nullable().default(null),
+      assetId: z.string().min(1),
+      localAssetId: z.string().min(1),
+      mode: z.enum(["preserve-local", "use-remote"]),
+    })
+    .strict(),
+  output: envelope(
+    z.object({
+      assetId: z.string().min(1),
+      mode: z.enum(["preserve-local", "use-remote"]),
+    }),
+  ),
+});
+
+export const relationshipsUnlinkRpc = defineRpc({
+  name: "shared-assets.relationships.unlink",
+  input: z
+    .object({
+      projectId: z.string().min(1),
+      workspaceId: z.string().min(1),
+      kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+      provider: z.string().min(1).nullable().default(null),
+      assetId: z.string().min(1),
+      deleteLocal: z.boolean().default(false),
+    })
+    .strict(),
+  output: envelope(
+    z.object({
+      assetId: z.string().min(1),
+      deleted: z.array(z.string()),
+      kept: z.array(z.string()),
+      hadLocalChanges: z.boolean(),
+    }),
+  ),
+});
+
+export const relationshipsBatchUnlinkRpc = defineRpc({
+  name: "shared-assets.relationships.batch-unlink",
+  input: z
+    .object({
+      projectId: z.string().min(1),
+      workspaceId: z.string().min(1),
+      kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+      provider: z.string().min(1).nullable().default(null),
+      assetIds: z.array(z.string().min(1)).min(1),
+      deleteLocal: z.boolean().default(false),
+    })
+    .strict(),
+  output: envelope(
+    z.object({
+      items: z.array(
+        z.object({
+          assetId: z.string().min(1),
+          deleted: z.array(z.string()),
+          kept: z.array(z.string()),
+          hadLocalChanges: z.boolean(),
+        }),
+      ),
+      failed: z.array(
+        z.object({
+          assetId: z.string().min(1),
+          message: z.string().min(1),
+        }),
+      ),
+    }),
+  ),
 });
 
 export const AssetDiffResultSchema = z.object({

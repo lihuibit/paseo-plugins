@@ -2,9 +2,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   ActivityIndicator,
@@ -13,6 +16,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type PressableStateCallbackType,
   type StyleProp,
   type TextStyle,
@@ -475,15 +479,39 @@ export interface MenuOption {
   destructive?: boolean;
 }
 
+export interface MenuAnchor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface MenuRequest {
   title?: string;
   options: MenuOption[];
   selected?: string;
+  /** Viewport coordinates of the control that opened the menu. */
+  anchor?: MenuAnchor;
   onSelect: (value: string) => void;
+}
+
+function measureAnchor(
+  ref: RefObject<View | null>,
+  onMeasured: (anchor?: MenuAnchor) => void,
+): void {
+  const node = ref.current;
+  if (!node || typeof node.measureInWindow !== "function") {
+    onMeasured();
+    return;
+  }
+  node.measureInWindow((x, y, width, height) => {
+    onMeasured({ x, y, width, height });
+  });
 }
 
 interface OverlayContextValue {
   openMenu: (request: MenuRequest) => void;
+  closeMenu: () => void;
 }
 
 const OverlayContext = createContext<OverlayContextValue | null>(null);
@@ -502,132 +530,270 @@ export function OverlayMenuProvider({
   tokens: Tokens;
 }) {
   const [menu, setMenu] = useState<MenuRequest | null>(null);
-  const openMenu = useCallback((request: MenuRequest) => setMenu(request), []);
-  const value = useMemo(() => ({ openMenu }), [openMenu]);
+  const [menuHeight, setMenuHeight] = useState<number | null>(null);
+  const openMenu = useCallback((request: MenuRequest) => {
+    setMenuHeight(null);
+    setMenu(request);
+  }, []);
+  const closeMenu = useCallback(() => {
+    setMenu((current) => (current ? null : current));
+  }, []);
+  const value = useMemo(() => ({ openMenu, closeMenu }), [openMenu, closeMenu]);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const overlayRef = useRef<View>(null);
+  const [overlayOffset, setOverlayOffset] = useState({ x: 0, y: 0 });
+
+  const measureOverlay = useCallback(() => {
+    overlayRef.current?.measureInWindow((x, y) => {
+      setOverlayOffset((current) =>
+        current.x === x && current.y === y ? current : { x, y },
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    measureOverlay();
+  }, [measureOverlay, windowHeight, windowWidth]);
+
+  useEffect(() => {
+    setMenuHeight(null);
+    measureOverlay();
+  }, [measureOverlay, menu]);
+
+  useEffect(() => {
+    if (!menu || typeof window === "undefined") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenu(null);
+      }
+    };
+    const onScrollIntent = (event: Event) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('[data-testid="overlay-menu"]')
+      ) {
+        return;
+      }
+      setMenu(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("wheel", onScrollIntent, { passive: true });
+    window.addEventListener("touchmove", onScrollIntent, { passive: true });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("wheel", onScrollIntent);
+      window.removeEventListener("touchmove", onScrollIntent);
+    };
+  }, [menu]);
+
+  const geometry = useMemo(() => {
+    if (!menu) return null;
+    const margin = 8;
+    const gap = 6;
+    const width = Math.min(320, windowWidth - margin * 2);
+    const estimatedHeight = Math.min(
+      52 + menu.options.length * 40,
+      440,
+      windowHeight - margin * 2,
+    );
+    const height = menuHeight ?? estimatedHeight;
+    const anchor = menu.anchor;
+    const toSurface = (left: number, top: number) => ({
+      left: left - overlayOffset.x,
+      top: top - overlayOffset.y,
+    });
+    if (!anchor) {
+      const position = toSurface(
+        (windowWidth - width) / 2,
+        (windowHeight - height) / 2,
+      );
+      return {
+        left: position.left,
+        top: position.top,
+        width,
+        maxHeight: height,
+      };
+    }
+    const left = Math.min(
+      Math.max(anchor.x + anchor.width / 2 - width / 2, margin),
+      windowWidth - width - margin,
+    );
+    const below = anchor.y + anchor.height + gap;
+    const above = anchor.y - gap;
+    const fitsBelow = below + height <= windowHeight - margin;
+    const fitsAbove = above - height >= margin;
+    if (fitsBelow || !fitsAbove) {
+      const windowTop = Math.max(
+        margin,
+        Math.min(below, windowHeight - margin - 96),
+      );
+      const position = toSurface(left, windowTop);
+      return {
+        left: position.left,
+        top: position.top,
+        width,
+        maxHeight: Math.max(96, windowHeight - margin - windowTop),
+      };
+    }
+    const position = toSurface(left, above - height);
+    return {
+      left: position.left,
+      top: position.top,
+      width,
+      maxHeight: height,
+    };
+  }, [
+    menu,
+    menuHeight,
+    overlayOffset.x,
+    overlayOffset.y,
+    windowHeight,
+    windowWidth,
+  ]);
+
   return (
     <OverlayContext.Provider value={value}>
       {children}
-      {menu ? (
-        <View
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(0,0,0,0.08)",
-            zIndex: 2000,
-          }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="关闭菜单"
-            onPress={() => setMenu(null)}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-            }}
-          />
-          <View
-            style={{
-              width: 320,
-              maxWidth: "92%",
-              maxHeight: 440,
-              borderRadius: tokens.radius.xl,
-              borderWidth: 1,
-              borderColor: tokens.colors.border,
-              backgroundColor: tokens.colors.surface0,
-              overflow: "hidden",
-            }}
-          >
-            <View
+      <View
+        ref={overlayRef}
+        pointerEvents="box-none"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 2000,
+        }}
+      >
+        {menu && geometry ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="关闭菜单"
+              onPress={() => setMenu(null)}
               style={{
-                flexDirection: "row",
-                alignItems: "center",
-                paddingHorizontal: tokens.spacing[4],
-                paddingVertical: tokens.spacing[3],
-                borderBottomWidth: 1,
-                borderBottomColor: tokens.colors.border,
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+              }}
+            />
+            <View
+              testID="overlay-menu"
+              onLayout={(event) => {
+                const height = event.nativeEvent.layout.height;
+                setMenuHeight((current) =>
+                  current !== null && Math.abs(current - height) < 0.5
+                    ? current
+                    : height,
+                );
+              }}
+              style={{
+                position: "absolute",
+                left: geometry.left,
+                top: geometry.top,
+                width: geometry.width,
+                maxHeight: geometry.maxHeight,
+                borderRadius: tokens.radius.xl,
+                borderWidth: 1,
+                borderColor: tokens.colors.border,
+                backgroundColor: tokens.colors.surface0,
+                overflow: "hidden",
+                shadowColor: "#000",
+                shadowOpacity: 0.18,
+                shadowRadius: 18,
+                shadowOffset: { width: 0, height: 8 },
+                elevation: 12,
               }}
             >
-              <Text
+              <View
                 style={{
-                  flex: 1,
-                  color: tokens.colors.foreground,
-                  fontSize: tokens.fontSize.base,
-                  fontWeight: "500",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: tokens.spacing[4],
+                  paddingVertical: tokens.spacing[3],
+                  borderBottomWidth: 1,
+                  borderBottomColor: tokens.colors.border,
                 }}
               >
-                {menu.title ?? "选择"}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="关闭"
-                onPress={() => setMenu(null)}
-                hitSlop={8}
-              >
-                <Icon
-                  name="X"
-                  size={16}
-                  color={tokens.colors.foregroundMuted}
-                />
-              </Pressable>
-            </View>
-            <ScrollView>
-              {menu.options.map((option) => {
-                const selected = option.value === menu.selected;
-                return (
-                  <Pressable
-                    key={option.value}
-                    accessibilityRole="button"
-                    disabled={option.disabled}
-                    onPress={() => {
-                      if (option.disabled) return;
-                      setMenu(null);
-                      menu.onSelect(option.value);
-                    }}
-                    style={{
-                      paddingHorizontal: tokens.spacing[4],
-                      paddingVertical: tokens.spacing[2],
-                      backgroundColor: selected
-                        ? tokens.colors.surface2
-                        : "transparent",
-                      opacity: option.disabled ? 0.5 : 1,
-                      gap: 2,
-                    }}
-                  >
-                    <Text
+                <Text
+                  style={{
+                    flex: 1,
+                    color: tokens.colors.foreground,
+                    fontSize: tokens.fontSize.base,
+                    fontWeight: "500",
+                  }}
+                >
+                  {menu.title ?? "选择"}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="关闭"
+                  onPress={() => setMenu(null)}
+                  hitSlop={8}
+                >
+                  <Icon
+                    name="X"
+                    size={16}
+                    color={tokens.colors.foregroundMuted}
+                  />
+                </Pressable>
+              </View>
+              <ScrollView style={{ flexGrow: 0 }}>
+                {menu.options.map((option) => {
+                  const selected = option.value === menu.selected;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      accessibilityRole="button"
+                      disabled={option.disabled}
+                      onPress={() => {
+                        if (option.disabled) return;
+                        setMenu(null);
+                        menu.onSelect(option.value);
+                      }}
                       style={{
-                        color: option.destructive
-                          ? tokens.colors.destructive
-                          : tokens.colors.foreground,
-                        fontSize: tokens.fontSize.base,
+                        paddingHorizontal: tokens.spacing[4],
+                        paddingVertical: tokens.spacing[2],
+                        backgroundColor: selected
+                          ? tokens.colors.surface2
+                          : "transparent",
+                        opacity: option.disabled ? 0.5 : 1,
+                        gap: 2,
                       }}
                     >
-                      {option.label}
-                    </Text>
-                    {option.description ? (
                       <Text
                         style={{
-                          color: tokens.colors.foregroundMuted,
-                          fontSize: tokens.fontSize.sm,
+                          color: option.destructive
+                            ? tokens.colors.destructive
+                            : tokens.colors.foreground,
+                          fontSize: tokens.fontSize.base,
                         }}
                       >
-                        {option.description}
+                        {option.label}
                       </Text>
-                    ) : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      ) : null}
+                      {option.description ? (
+                        <Text
+                          style={{
+                            color: tokens.colors.foregroundMuted,
+                            fontSize: tokens.fontSize.sm,
+                          }}
+                        >
+                          {option.description}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </>
+        ) : null}
+      </View>
     </OverlayContext.Provider>
   );
 }
@@ -656,22 +822,27 @@ export function SelectField({
   testID?: string;
 }) {
   const { openMenu } = useOverlayMenu();
+  const triggerRef = useRef<View>(null);
   const selected = options.find((option) => option.value === value);
   const height = size === "md" ? tokens.control.md : tokens.control.sm;
   return (
     <Field label={label} hint={hint} tokens={tokens}>
       <Pressable
+        ref={triggerRef}
         accessibilityRole="button"
         accessibilityLabel={`${label}：${selected?.label ?? placeholder}`}
         disabled={disabled}
         testID={testID}
         onPress={() =>
-          openMenu({
-            title: label,
-            options,
-            selected: value ?? undefined,
-            onSelect: onChange,
-          })
+          measureAnchor(triggerRef, (anchor) =>
+            openMenu({
+              title: label,
+              options,
+              selected: value ?? undefined,
+              anchor,
+              onSelect: onChange,
+            }),
+          )
         }
         style={{
           flexDirection: "row",
@@ -719,19 +890,25 @@ export function Pill({
 }: {
   label: string;
   active?: boolean;
-  onPress?: () => void;
+  onPress?: (anchor?: MenuAnchor) => void;
   tokens: Tokens;
   icon?: string;
   onRemove?: () => void;
   disabled?: boolean;
   testID?: string;
 }) {
+  const triggerRef = useRef<View>(null);
   return (
     <Pressable
+      ref={triggerRef}
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled || (!onPress && !onRemove)}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => measureAnchor(triggerRef, (anchor) => onPress(anchor))
+          : undefined
+      }
       testID={testID}
       style={{
         height: 28,
@@ -851,17 +1028,19 @@ export function StatusMenuTrigger({
   testID,
 }: {
   status: BoardStatus;
-  onPress: () => void;
+  onPress: (anchor?: MenuAnchor) => void;
   tokens: Tokens;
   disabled?: boolean;
   testID?: string;
 }) {
+  const triggerRef = useRef<View>(null);
   return (
     <Pressable
+      ref={triggerRef}
       accessibilityRole="button"
       accessibilityLabel="切换任务状态"
       disabled={disabled}
-      onPress={onPress}
+      onPress={() => measureAnchor(triggerRef, onPress)}
       testID={testID}
       style={{
         flexDirection: "row",
@@ -1013,6 +1192,7 @@ export function Sheet({
   scrollable?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
 }) {
+  const overlay = useContext(OverlayContext);
   if (!visible) return null;
   const body = (
     <View style={{ gap: tokens.spacing[3], flexGrow: 1 }}>{children}</View>
@@ -1078,6 +1258,8 @@ export function Sheet({
         {scrollable ? (
           <ScrollView
             style={{ flex: 1 }}
+            onScroll={overlay?.closeMenu}
+            scrollEventThrottle={16}
             contentContainerStyle={[
               {
                 paddingHorizontal: tokens.spacing[6],

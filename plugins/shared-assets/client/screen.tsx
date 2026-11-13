@@ -1,79 +1,123 @@
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Image, Pressable, ScrollView, Text, View } from "react-native";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import type {
   AssetDiffResult,
+  AssetKind,
   AssetReadResult,
-  AssetSummary,
+  AssetRelationshipRow,
   BatchPublishPreview,
   BatchPublishResult,
   Binding,
   DriftItem,
   IgnoreRulesResult,
-  InstructionStatusResult,
-  InstructionTargetStatus,
+  LocalAssetSummary,
   MergePreviewResult,
   MergeResolution,
   MigrationReport,
+  ProjectAttentionItem,
   ProjectSummary,
   ProviderStatus,
-  PublishPreview,
-  SkillListResult,
+  RelationshipListResult,
+  UnlinkResult,
 } from "../shared/core/types";
 import type { RpcEnvelope } from "../shared/core/errors";
-import { SKILL_ROOTS, SUPPORTED_PROVIDERS } from "../shared/core/providers";
 import {
-  assetsListRpc,
   assetReadRpc,
   batchPublishCommitRpc,
   batchPublishPreviewRpc,
   configureRpc,
   diffRpc,
+  driftIgnoreRpc,
   driftListRpc,
   driftResolveRpc,
   driftUnignoreRpc,
-  instructionsSetEnabledRpc,
-  instructionsStatusRpc,
   ignoreRulesGetRpc,
   ignoreRulesSetRpc,
+  instructionsSetEnabledRpc,
   mergeApplyRpc,
   mergePreviewRpc,
   migrateLegacyRpc,
   projectsListRpc,
   providersListRpc,
-  publishCommitRpc,
-  publishPreviewRpc,
-  skillsListRpc,
+  relationshipsAdoptRpc,
+  relationshipsBatchUnlinkRpc,
+  relationshipsListRpc,
+  relationshipsUnlinkRpc,
   skillsSetEnabledRpc,
   statusRpc,
   syncRpc,
   unbindRpc,
   workspacePullRpc,
 } from "../shared/contracts";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  ConfirmInline,
+  Dialog,
+  Divider,
+  Empty,
+  Field,
+  IconButton,
+  Muted,
+  Mono,
+  Panel,
+  SectionTitle,
+  Spinner,
+  TabButton,
+  TabRail,
+  TextField,
+} from "./ui/components";
+import { createTokens, type Tokens } from "./ui/tokens";
 
-type Theme = PluginScreenProps["theme"];
-type Styles = ReturnType<typeof makeStyles>;
 type Tab =
   "skills" | "prompt" | "knowledge" | "docs" | "changes" | "drift" | "settings";
-type StatusResult = {
-  binding: Binding;
-  sharedExists: boolean;
-  assetCounts: { skills: number; knowledge: number; docs: number };
+
+type Selection = { assetId: string; provider?: string };
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "skills", label: "Skills" },
+  { id: "prompt", label: "SYSTEM Prompt" },
+  { id: "knowledge", label: "经验库" },
+  { id: "docs", label: "项目文档" },
+  { id: "changes", label: "变更 / 发布" },
+  { id: "drift", label: "Drift" },
+  { id: "settings", label: "设置" },
+];
+
+const KIND_LABELS: Record<AssetKind, string> = {
+  skill: "Skill",
+  prompt: "SYSTEM Prompt",
+  knowledge: "经验库",
+  doc: "项目文档",
 };
-type StatusCall = (input: {
-  projectId: string;
-}) => Promise<RpcEnvelope<StatusResult>>;
-type RunAction = (label: string, work: () => Promise<void>) => Promise<void>;
+
+const ATTENTION_LABELS: Record<ProjectAttentionItem["reason"], string> = {
+  diverged: "双方均有修改",
+  "local-update": "本地未发布",
+  "remote-update": "远端有更新",
+  "remote-deleted": "远端已删除",
+  "unpublished-local": "未同步远端",
+  synced: "已同步",
+  missing: "本地缺失",
+};
+
+const DRIFT_TONES: Record<
+  ProjectAttentionItem["reason"],
+  "ok" | "warn" | "danger" | "muted"
+> = {
+  diverged: "danger",
+  "local-update": "warn",
+  "remote-update": "warn",
+  "remote-deleted": "danger",
+  "unpublished-local": "muted",
+  synced: "ok",
+  missing: "muted",
+};
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -84,2160 +128,134 @@ function unwrap<T>(envelope: RpcEnvelope<T>): T {
   throw new Error(`${envelope.error.code}: ${envelope.error.message}`);
 }
 
-function shortRevision(value: string | null): string {
+function isRevisionConflict(error: unknown): boolean {
+  return messageOf(error).includes("E_REVISION_CONFLICT");
+}
+
+function shortRevision(value: string | null | undefined): string {
   return value ? value.slice(0, 8) : "—";
 }
 
-function makeStyles(theme: Theme, compact: boolean) {
-  return StyleSheet.create({
-    screen: { flex: 1, backgroundColor: theme.colors.surface0 },
-    content: {
-      padding: compact ? 16 : 28,
-      gap: 16,
-      paddingBottom: 48,
-      flexShrink: 0,
-    },
-    detail: { gap: 16, flexShrink: 0 },
-    headerRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12,
-      flexWrap: "wrap",
-    },
-    title: {
-      color: theme.colors.foreground,
-      fontSize: compact ? 22 : 26,
-      fontWeight: "600",
-    },
-    subtitle: {
-      color: theme.colors.foregroundMuted,
-      fontSize: 13,
-      lineHeight: 18,
-    },
-    card: {
-      borderColor: theme.colors.border,
-      borderWidth: 1,
-      borderRadius: 10,
-      backgroundColor: theme.colors.surface1,
-      padding: 16,
-      gap: 10,
-      flexShrink: 0,
-    },
-    cardPressed: { borderColor: theme.colors.accent },
-    sectionTitle: {
-      color: theme.colors.foreground,
-      fontSize: 16,
-      fontWeight: "600",
-    },
-    row: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      flexWrap: "wrap",
-    },
-    spaceBetween: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12,
-    },
-    label: { color: theme.colors.foregroundMuted, fontSize: 12 },
-    value: { color: theme.colors.foreground, fontSize: 13 },
-    mono: {
-      color: theme.colors.foreground,
-      fontSize: 12,
-      fontFamily: "monospace",
-    },
-    monoBox: {
-      backgroundColor: theme.colors.surface0,
-      borderColor: theme.colors.border,
-      borderWidth: 1,
-      borderRadius: 6,
-      padding: 10,
-      flexShrink: 0,
-    },
-    button: {
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      borderRadius: 6,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface2,
-    },
-    buttonPrimary: {
-      backgroundColor: theme.colors.accent,
-      borderColor: theme.colors.accent,
-    },
-    buttonDanger: { borderColor: theme.colors.statusDanger },
-    buttonDisabled: { opacity: 0.45 },
-    buttonText: { color: theme.colors.foreground, fontSize: 13 },
-    buttonTextPrimary: { color: theme.colors.accentForeground, fontSize: 13 },
-    buttonTextDanger: { color: theme.colors.statusDanger, fontSize: 13 },
-    input: {
-      borderColor: theme.colors.border,
-      borderWidth: 1,
-      borderRadius: 6,
-      backgroundColor: theme.colors.surface0,
-      color: theme.colors.foreground,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      fontSize: 13,
-    },
-    textArea: { minHeight: 140, textAlignVertical: "top" },
-    badge: {
-      borderRadius: 999,
-      paddingHorizontal: 8,
-      paddingVertical: 2,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-    },
-    badgeText: { fontSize: 11, color: theme.colors.foregroundMuted },
-    ok: { color: theme.colors.statusSuccess, fontSize: 12 },
-    warn: { color: theme.colors.statusWarning, fontSize: 12 },
-    error: { color: theme.colors.statusDanger, fontSize: 12 },
-    tabRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
-    tab: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 },
-    tabActive: { backgroundColor: theme.colors.surface2 },
-    tabText: { color: theme.colors.foregroundMuted, fontSize: 13 },
-    tabTextActive: { color: theme.colors.foreground, fontWeight: "600" },
-    listRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 12,
-      paddingVertical: 10,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.border,
-      flexShrink: 0,
-    },
-    grow: { flex: 1, gap: 4 },
-    empty: {
-      color: theme.colors.foregroundMuted,
-      fontSize: 13,
-      paddingVertical: 12,
-    },
-    image: {
-      width: "100%",
-      height: 220,
-      borderRadius: 6,
-      resizeMode: "contain",
-    },
-  });
+function repositoryDisplayName(repoUrl: string | null): string {
+  if (!repoUrl) return "共享仓库";
+  const path = repoUrl.split(/[?#]/, 1)[0] ?? repoUrl;
+  return (
+    path
+      .replace(/\/+$/, "")
+      .split(/[/:]/)
+      .pop()
+      ?.replace(/\.git$/i, "") || repoUrl
+  );
 }
 
-function Button({
+function syncSummary(project: ProjectSummary): string {
+  if (!project.bound) return "未配置共享库";
+  if (!project.workspaceId) {
+    return "该项目还没有工作区，先创建一个工作区再配置共享资产";
+  }
+  const active = project.attention.items.filter((item) => !item.ignored);
+  if (active.some((item) => item.reason === "diverged")) {
+    return "存在冲突，需要处理";
+  }
+  if (active.some((item) => item.reason === "local-update")) {
+    return "有未发布的本地修改";
+  }
+  if (active.some((item) => item.reason === "unpublished-local")) {
+    return "有尚未同步到共享仓库的本地资产";
+  }
+  if (
+    active.some((item) => item.reason === "remote-update") ||
+    (project.state?.behind ?? 0) > 0
+  ) {
+    return "远端有更新";
+  }
+  if (project.state?.dirty) return "共享 checkout 有未提交修改";
+  return "已同步";
+}
+
+function attentionKey(item: ProjectAttentionItem): string {
+  return `${item.kind}:${item.provider ?? ""}:${item.name}`;
+}
+
+function assetIdForLocal(local: LocalAssetSummary): string {
+  if (local.kind === "knowledge") return `knowledge/${local.name}.md`;
+  if (local.kind === "doc") return `doc/${local.name}`;
+  if (local.kind === "prompt") return "prompt";
+  return `skill:project/${local.name}`;
+}
+
+function StatCard({
   label,
-  onPress,
-  disabled,
-  primary,
-  danger,
-  styles,
-  testID,
+  value,
+  tokens,
+  compact,
 }: {
   label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  primary?: boolean;
-  danger?: boolean;
-  styles: Styles;
-  testID?: string;
+  value: number;
+  tokens: Tokens;
+  compact: boolean;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      testID={testID}
-      disabled={disabled}
-      onPress={onPress}
-      style={[
-        styles.button,
-        primary ? styles.buttonPrimary : null,
-        danger ? styles.buttonDanger : null,
-        disabled ? styles.buttonDisabled : null,
-      ]}
+    <View
+      style={{
+        minWidth: compact ? 0 : 110,
+        flexBasis: compact ? 96 : undefined,
+        flexGrow: compact ? 1 : 0,
+        borderWidth: 1,
+        borderColor: tokens.colors.border,
+        backgroundColor: tokens.colors.surface1,
+        borderRadius: tokens.radius.lg,
+        paddingHorizontal: tokens.spacing[3],
+        paddingVertical: tokens.spacing[2],
+        gap: 2,
+      }}
     >
       <Text
-        style={
-          primary
-            ? styles.buttonTextPrimary
-            : danger
-              ? styles.buttonTextDanger
-              : styles.buttonText
-        }
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function Badge({
-  label,
-  styles,
-  tone,
-}: {
-  label: string;
-  styles: Styles;
-  tone?: "ok" | "warn";
-}) {
-  return (
-    <View style={styles.badge}>
-      <Text
-        style={[
-          styles.badgeText,
-          tone === "ok" ? styles.ok : tone === "warn" ? styles.warn : null,
-        ]}
-      >
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function StatusCard({
-  project,
-  status,
-  busy,
-  onSync,
-  onUnbind,
-  unbindArmed,
-  onArmUnbind,
-  onConfigure,
-  styles,
-}: {
-  project: ProjectSummary;
-  status: StatusResult | null;
-  busy: string | null;
-  onSync: () => void;
-  onUnbind: () => void;
-  unbindArmed: boolean;
-  onArmUnbind: () => void;
-  onConfigure: () => void;
-  styles: Styles;
-}) {
-  if (!project.bound) {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>尚未绑定共享仓库</Text>
-        <Text style={styles.subtitle}>
-          绑定一个团队 Git 仓库后，Skill、AGENTS.md、Knowledge 与 Doc
-          会出现在这里。
-        </Text>
-        <View style={styles.row}>
-          <Button
-            label="绑定仓库"
-            onPress={onConfigure}
-            primary
-            styles={styles}
-            testID="shared-assets-configure-open"
-          />
-        </View>
-      </View>
-    );
-  }
-  const binding = status?.binding;
-  return (
-    <View style={styles.card}>
-      <View style={styles.spaceBetween}>
-        <Text style={styles.sectionTitle}>
-          {binding?.displayName ?? project.libraryId ?? "共享仓库"}
-        </Text>
-        <View style={styles.row}>
-          <Badge
-            label={binding?.syncMode === "auto" ? "自动同步" : "手动同步"}
-            styles={styles}
-          />
-          {binding?.state.dirty ? (
-            <Badge label="本地改动" styles={styles} tone="warn" />
-          ) : null}
-          {binding?.state.behind ? (
-            <Badge
-              label={`落后 ${binding.state.behind}`}
-              styles={styles}
-              tone="warn"
-            />
-          ) : null}
-          {binding?.state.ahead ? (
-            <Badge label={`领先 ${binding.state.ahead}`} styles={styles} />
-          ) : null}
-        </View>
-      </View>
-      <Text style={styles.mono}>{binding?.repoUrl ?? ""}</Text>
-      <View style={styles.row}>
-        <Text style={styles.label}>分支</Text>
-        <Text style={styles.value}>{binding?.branch ?? "(默认分支)"}</Text>
-        <Text style={styles.label}>本地</Text>
-        <Text style={styles.mono} testID="shared-assets-local-revision">
-          {shortRevision(binding?.state.localRevision ?? null)}
-        </Text>
-        <Text style={styles.label}>远端</Text>
-        <Text style={styles.mono}>
-          {shortRevision(binding?.state.remoteRevision ?? null)}
-        </Text>
-      </View>
-      <Text style={styles.label}>
-        最近同步{" "}
-        {binding?.state.lastSyncedAt
-          ? new Date(binding.state.lastSyncedAt).toLocaleString()
-          : "—"}
-      </Text>
-      {binding?.state.lastError ? (
-        <Text style={styles.error}>
-          {binding.state.lastError.code}: {binding.state.lastError.message}
-        </Text>
-      ) : null}
-      <View style={styles.row}>
-        <Button
-          label={busy === "sync" ? "同步中…" : "检查更新并同步"}
-          onPress={onSync}
-          disabled={busy !== null}
-          primary
-          styles={styles}
-          testID="shared-assets-sync"
-        />
-        <Button
-          label="重新绑定"
-          onPress={onConfigure}
-          disabled={busy !== null}
-          styles={styles}
-        />
-        <Button
-          label={unbindArmed ? "确认解绑（不删项目文件）" : "解绑"}
-          onPress={unbindArmed ? onUnbind : onArmUnbind}
-          disabled={busy !== null}
-          danger
-          styles={styles}
-        />
-        <Button
-          label="刷新"
-          onPress={onSync}
-          disabled={busy !== null}
-          styles={styles}
-        />
-      </View>
-    </View>
-  );
-}
-
-async function loadStatus(
-  statusCall: StatusCall,
-  projectId: string,
-): Promise<StatusResult> {
-  return unwrap(await statusCall({ projectId }));
-}
-
-function ConfigureForm({
-  project,
-  onCancel,
-  onDone,
-  styles,
-}: {
-  project: ProjectSummary;
-  onCancel: () => void;
-  onDone: () => void;
-  styles: Styles;
-}) {
-  const configure = useRpc(configureRpc);
-  const [repoUrl, setRepoUrl] = useState("");
-  const [branch, setBranch] = useState("");
-  const [syncMode, setSyncMode] = useState<"auto" | "manual">("manual");
-  const [trusted, setTrusted] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      unwrap(
-        await configure({
-          projectId: project.projectId,
-          repoUrl: repoUrl.trim(),
-          branch: branch.trim() ? branch.trim() : null,
-          syncMode,
-          trustConfirmed: true,
-        }),
-      );
-      onDone();
-    } catch (value) {
-      setError(messageOf(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle}>
-        绑定共享仓库 · {project.displayName}
-      </Text>
-      <Text style={styles.label}>Git URL（HTTPS / SSH / 本地路径）</Text>
-      <TextInput
-        value={repoUrl}
-        onChangeText={setRepoUrl}
-        placeholder="git@example.com:team/team-assets.git"
-        placeholderTextColor={styles.label.color}
-        style={styles.input}
-        autoCapitalize="none"
-        autoCorrect={false}
-        testID="shared-assets-repo-url"
-      />
-      <Text style={styles.label}>分支（留空使用远端默认分支）</Text>
-      <TextInput
-        value={branch}
-        onChangeText={setBranch}
-        placeholder="main"
-        placeholderTextColor={styles.label.color}
-        style={styles.input}
-        autoCapitalize="none"
-        autoCorrect={false}
-        testID="shared-assets-branch"
-      />
-      <View style={styles.row}>
-        <Button
-          label="自动同步"
-          onPress={() => setSyncMode("auto")}
-          primary={syncMode === "auto"}
-          styles={styles}
-        />
-        <Button
-          label="手动同步"
-          onPress={() => setSyncMode("manual")}
-          primary={syncMode === "manual"}
-          styles={styles}
-        />
-      </View>
-      <Pressable
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: trusted }}
-        onPress={() => setTrusted((value) => !value)}
-        style={styles.row}
-        testID="shared-assets-trust"
-      >
-        <View
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: 3,
-            borderWidth: 1,
-            borderColor: trusted ? styles.ok.color : styles.label.color,
-            backgroundColor: trusted ? styles.ok.color : "transparent",
-          }}
-        />
-        <Text style={styles.value}>我信任该仓库中的指令与 Skill 内容</Text>
-      </Pressable>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={styles.row}>
-        <Button
-          label={busy ? "绑定中…" : "绑定并同步"}
-          onPress={submit}
-          disabled={busy || !repoUrl.trim() || !trusted}
-          primary
-          styles={styles}
-          testID="shared-assets-configure-submit"
-        />
-        <Button
-          label="取消"
-          onPress={onCancel}
-          disabled={busy}
-          styles={styles}
-        />
-      </View>
-      <Text style={styles.label}>
-        Team Assets 仓库根目录需要 team-assets.json；checkout 写入
-        $PASEO_HOME/plugin-data/agentstorm-shared-assets/repos/&lt;projectId&gt;。
-      </Text>
-    </View>
-  );
-}
-
-function SkillsTab({
-  data,
-  workspaceDirectory,
-  busy,
-  onToggle,
-  styles,
-}: {
-  data: SkillListResult | null;
-  workspaceDirectory: string | null;
-  busy: string | null;
-  onToggle: (assetId: string, enabled: boolean, provider?: string) => void;
-  styles: Styles;
-}) {
-  if (!data) return <ActivityIndicator />;
-  if (data.skills.length === 0) {
-    return (
-      <Text style={styles.empty}>
-        共享仓库中没有 skills/project 或 skills/global 条目。
-      </Text>
-    );
-  }
-  return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Skills</Text>
-      <Text style={styles.label}>
-        启用后投影到对应 Provider 的项目级 Skill
-        目录；停用只删除未被修改的受管副本。
-      </Text>
-      {data.skills.map((skill) => {
-        const projections = data.projections.filter(
-          (entry) => entry.assetId === skill.assetId,
-        );
-        const enabled = projections.some((entry) => entry.state === "managed");
-        return (
-          <View
-            key={skill.assetId}
-            style={styles.listRow}
-            testID={`shared-assets-skill-${skill.name}`}
-          >
-            <View style={styles.grow}>
-              <Text style={styles.value}>
-                {skill.name} <Text style={styles.label}>· {skill.scope}</Text>
-              </Text>
-              {skill.description ? (
-                <Text style={styles.label}>{skill.description}</Text>
-              ) : null}
-              {workspaceDirectory
-                ? SUPPORTED_PROVIDERS.map((provider) => (
-                    <Text key={`path-${provider}`} style={styles.mono}>
-                      {workspaceDirectory}/{SKILL_ROOTS[provider]}/{skill.name}
-                    </Text>
-                  ))
-                : null}
-              <View style={styles.row}>
-                {SUPPORTED_PROVIDERS.map((provider) => {
-                  const projection = projections.find(
-                    (entry) => entry.provider === provider,
-                  );
-                  const label =
-                    projection?.state === "managed"
-                      ? `${provider} 已启用`
-                      : projection?.state === "modified"
-                        ? `${provider} 有本地改动`
-                        : `${provider} 未启用`;
-                  return (
-                    <Badge
-                      key={provider}
-                      label={label}
-                      styles={styles}
-                      tone={
-                        projection?.state === "managed"
-                          ? "ok"
-                          : projection?.state === "modified"
-                            ? "warn"
-                            : undefined
-                      }
-                    />
-                  );
-                })}
-                <Text style={styles.label}>{skill.fileCount} 个文件</Text>
-              </View>
-            </View>
-            <View style={styles.row}>
-              {SUPPORTED_PROVIDERS.map((provider) => {
-                const projection = projections.find(
-                  (entry) => entry.provider === provider,
-                );
-                const active =
-                  projection?.state === "managed" ||
-                  projection?.state === "modified";
-                return (
-                  <Button
-                    key={provider}
-                    testID={`shared-assets-skill-toggle-${skill.name}-${provider}`}
-                    label={`${active ? "停用" : "启用"} ${provider}`}
-                    onPress={() => onToggle(skill.assetId, !active, provider)}
-                    disabled={busy !== null}
-                    primary={!active}
-                    styles={styles}
-                  />
-                );
-              })}
-              <Button
-                testID={`shared-assets-skill-toggle-${skill.name}`}
-                label={enabled ? "全部停用" : "全部启用"}
-                onPress={() => onToggle(skill.assetId, !enabled, "both")}
-                disabled={busy !== null}
-                styles={styles}
-              />
-            </View>
-          </View>
-        );
-      })}
-      {data.warnings.map((warning) => (
-        <Text key={warning} style={styles.warn}>
-          {warning}
-        </Text>
-      ))}
-    </View>
-  );
-}
-
-function targetLabel(target: InstructionTargetStatus): string {
-  if (target.state === "managed") return "已投影";
-  if (target.state === "conflict") return "冲突";
-  return "未投影";
-}
-
-function PromptTab({
-  project,
-  status,
-  workspaceId,
-  content,
-  busy,
-  onToggle,
-  styles,
-}: {
-  project: ProjectSummary;
-  status: InstructionStatusResult | null;
-  workspaceId: string | null;
-  content: string | null;
-  busy: string | null;
-  onToggle: (provider: string, enabled: boolean) => void;
-  styles: Styles;
-}) {
-  return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle}>SYSTEM Prompt / AGENTS.md</Text>
-      <Text style={styles.label}>
-        链路：共享 AGENTS.md → 项目 .agentstorm/AGENTS.md → Provider 原生入口。
-      </Text>
-      {!workspaceId ? (
-        <Text style={styles.warn}>
-          该项目还没有 Workspace，创建 Workspace 后才能投影。
-        </Text>
-      ) : null}
-      <View style={styles.row}>
-        <Text style={styles.label}>共享文件</Text>
-        <Badge
-          label={status?.sharedExists ? "存在" : "缺失"}
-          styles={styles}
-          tone={status?.sharedExists ? "ok" : "warn"}
-        />
-        <Text style={styles.label}>canonical</Text>
-        <Badge
-          label={
-            status?.canonical.exists
-              ? status.canonical.matchesShared
-                ? "与共享一致"
-                : "内容不同"
-              : "未创建"
-          }
-          styles={styles}
-          tone={status?.canonical.matchesShared ? "ok" : "warn"}
-        />
-      </View>
-      <View style={styles.grow}>
-        {status?.targets.map((target) => (
-          <View key={target.provider} style={styles.listRow}>
-            <View style={styles.grow}>
-              <Text style={styles.value}>{target.provider}</Text>
-              <Text style={styles.mono}>{target.targetPath}</Text>
-            </View>
-            <Badge
-              label={targetLabel(target)}
-              styles={styles}
-              tone={
-                target.state === "managed"
-                  ? "ok"
-                  : target.state === "conflict"
-                    ? "warn"
-                    : undefined
-              }
-            />
-            <Button
-              label={target.state === "managed" ? "停用" : "启用"}
-              onPress={() =>
-                onToggle(target.provider, target.state !== "managed")
-              }
-              disabled={busy !== null}
-              styles={styles}
-            />
-          </View>
-        ))}
-      </View>
-      <View style={styles.row}>
-        <Button
-          label="投影到两个 Provider"
-          onPress={() => onToggle("both", true)}
-          disabled={busy !== null || !workspaceId}
-          primary
-          styles={styles}
-          testID="shared-assets-instructions-enable"
-        />
-        <Button
-          label="全部停用"
-          onPress={() => onToggle("both", false)}
-          disabled={busy !== null || !workspaceId}
-          styles={styles}
-        />
-      </View>
-      {content ? (
-        <View style={styles.monoBox}>
-          <Text style={styles.mono} testID="shared-assets-prompt-content">
-            {content.slice(0, 4000)}
-          </Text>
-        </View>
-      ) : (
-        <Text style={styles.empty}>
-          {project.bound ? "共享仓库没有根 AGENTS.md。" : ""}
-        </Text>
-      )}
-    </View>
-  );
-}
-
-function PublishBox({
-  projectId,
-  assetId,
-  path,
-  content,
-  onChange,
-  styles,
-}: {
-  projectId: string;
-  assetId: string;
-  path?: string;
-  content: string;
-  onChange: (value: string) => void;
-  styles: Styles;
-}) {
-  const previewCall = useRpc(publishPreviewRpc);
-  const commitCall = useRpc(publishCommitRpc);
-  const [preview, setPreview] = useState<PublishPreview | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const doPreview = async () => {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      setPreview(
-        unwrap(await previewCall({ projectId, assetId, path, content })),
-      );
-    } catch (value) {
-      setError(messageOf(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doCommit = async () => {
-    if (!preview) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = unwrap(
-        await commitCall({
-          projectId,
-          assetId,
-          path,
-          content,
-          expectedRevision: preview.expectedRevision,
-        }),
-      );
-      setPreview(null);
-      setNotice(
-        `已生成 commit ${result.commit.slice(0, 8)}。${result.pushHint}`,
-      );
-    } catch (value) {
-      setError(messageOf(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle}>发布到共享仓库</Text>
-      <TextInput
-        value={content}
-        onChangeText={(value) => {
-          onChange(value);
-          setPreview(null);
+        style={{
+          color: tokens.colors.foreground,
+          fontSize: tokens.fontSize["2xl"],
+          fontWeight: "500",
         }}
-        multiline
-        style={[styles.input, styles.textArea]}
-        testID="shared-assets-publish-content"
-      />
-      <View style={styles.row}>
-        <Button
-          label="校验并预览 diff"
-          onPress={doPreview}
-          disabled={busy}
-          primary
-          styles={styles}
-          testID="shared-assets-publish-preview"
-        />
-        <Button
-          label={busy ? "处理中…" : "提交到共享仓库"}
-          onPress={doCommit}
-          disabled={busy || !preview}
-          styles={styles}
-          testID="shared-assets-publish-commit"
-        />
-      </View>
-      <Text style={styles.label}>
-        校验：路径、大小、凭据文件名、Skill frontmatter；push 需手动执行。
+      >
+        {value}
       </Text>
-      {preview ? (
-        <View style={styles.monoBox}>
-          <Text style={styles.label}>目标：{preview.item.targetPath}</Text>
-          <Text style={styles.mono} testID="shared-assets-publish-diff">
-            {preview.item.diff || "(无差异)"}
-          </Text>
-        </View>
-      ) : null}
-      {notice ? <Text style={styles.ok}>{notice}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-    </View>
-  );
-}
-
-function KnowledgeTab({
-  projectId,
-  assets,
-  styles,
-}: {
-  projectId: string;
-  assets: AssetSummary[];
-  styles: Styles;
-}) {
-  const readCall = useRpc(assetReadRpc);
-  const knowledge = assets.filter((asset) => asset.kind === "knowledge");
-  const [selected, setSelected] = useState<AssetSummary | null>(null);
-  const [content, setContent] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setSelected(knowledge[0] ?? null);
-  }, [knowledge.length]);
-
-  useEffect(() => {
-    if (!selected) {
-      setContent("");
-      return;
-    }
-    let cancelled = false;
-    void readCall({ projectId, assetId: selected.assetId })
-      .then(unwrap)
-      .then((result: AssetReadResult) => {
-        if (!cancelled) {
-          setContent(result.content ?? "");
-          setError(null);
-        }
-      })
-      .catch((value) => {
-        if (!cancelled) setError(messageOf(value));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, selected, readCall]);
-
-  if (knowledge.length === 0) {
-    return <Text style={styles.empty}>共享仓库中没有 knowledge/*.md。</Text>;
-  }
-
-  return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Knowledge</Text>
-      <View style={styles.row}>
-        {knowledge.map((asset) => (
-          <Button
-            key={asset.assetId}
-            label={asset.name}
-            onPress={() => setSelected(asset)}
-            primary={selected?.assetId === asset.assetId}
-            styles={styles}
-          />
-        ))}
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {selected ? (
-        <PublishBox
-          projectId={projectId}
-          assetId={selected.assetId}
-          content={content}
-          onChange={setContent}
-          styles={styles}
-        />
-      ) : null}
-    </View>
-  );
-}
-
-function DocsTab({
-  projectId,
-  assets,
-  styles,
-}: {
-  projectId: string;
-  assets: AssetSummary[];
-  styles: Styles;
-}) {
-  const readCall = useRpc(assetReadRpc);
-  const docs = assets.filter((asset) => asset.kind === "doc");
-  const [doc, setDoc] = useState<AssetSummary | null>(null);
-  const [file, setFile] = useState<string | null>(null);
-  const [read, setRead] = useState<AssetReadResult | null>(null);
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const first = docs[0] ?? null;
-    setDoc(first);
-    setFile(first?.files[0]?.path ?? null);
-  }, [docs.length]);
-
-  useEffect(() => {
-    if (!doc || !file) return;
-    let cancelled = false;
-    void readCall({ projectId, assetId: doc.assetId, path: file })
-      .then(unwrap)
-      .then((result) => {
-        if (cancelled) return;
-        setRead(result);
-        setText(result.content ?? "");
-        setError(null);
-      })
-      .catch((value) => {
-        if (!cancelled) setError(messageOf(value));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, doc, file, readCall]);
-
-  if (docs.length === 0) {
-    return (
-      <Text style={styles.empty}>
-        共享仓库中没有 docs/&lt;name&gt;/ 目录包。
+      <Text
+        style={{
+          color: tokens.colors.foregroundMuted,
+          fontSize: tokens.fontSize.sm,
+        }}
+      >
+        {label}
       </Text>
-    );
-  }
-
-  return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Doc 目录包</Text>
-      <View style={styles.row}>
-        {docs.map((asset) => (
-          <Button
-            key={asset.assetId}
-            label={`${asset.name} (${asset.fileCount})`}
-            onPress={() => {
-              setDoc(asset);
-              setFile(asset.files[0]?.path ?? null);
-            }}
-            primary={doc?.assetId === asset.assetId}
-            styles={styles}
-          />
-        ))}
-      </View>
-      {doc ? (
-        <View style={styles.row}>
-          {doc.files.map((entry) => (
-            <Button
-              key={entry.path}
-              label={entry.path}
-              onPress={() => setFile(entry.path)}
-              primary={file === entry.path}
-              styles={styles}
-            />
-          ))}
-        </View>
-      ) : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {read?.kind === "image" && read.dataUri ? (
-        <Image
-          source={{ uri: read.dataUri }}
-          style={styles.image}
-          testID="shared-assets-doc-image"
-        />
-      ) : null}
-      {read && read.kind === "binary" ? (
-        <Text style={styles.label}>二进制附件 · {read.size} bytes</Text>
-      ) : null}
-      {doc && file && read?.kind === "text" ? (
-        <PublishBox
-          projectId={projectId}
-          assetId={doc.assetId}
-          path={file}
-          content={text}
-          onChange={setText}
-          styles={styles}
-        />
-      ) : null}
     </View>
   );
 }
 
-function driftLabel(status: DriftItem["status"]): string {
-  if (status === "synced") return "已同步";
-  if (status === "local-update") return "本地已修改";
-  if (status === "remote-update") return "共享已更新";
-  if (status === "diverged") return "双方已修改";
-  if (status === "remote-deleted") return "共享已删除";
-  if (status === "unpublished-local") return "仅本地存在";
-  return "本地缺失";
-}
-
-function driftTone(status: DriftItem["status"]): "ok" | "warn" | undefined {
-  if (status === "synced") return "ok";
-  if (status === "diverged" || status === "remote-deleted") return "warn";
-  return undefined;
-}
-
-function pathForItem(item: DriftItem): string | undefined {
-  return (
-    item.files.find((file) => file.status !== "synced")?.path ??
-    item.files[0]?.path
-  );
-}
-
-function DriftTab({
-  projectId,
-  workspaceId,
-  items,
-  run,
-  onReload,
-  styles,
-}: {
-  projectId: string;
-  workspaceId: string | null;
-  items: DriftItem[];
-  run: RunAction;
-  onReload: () => void;
-  styles: Styles;
-}) {
-  const diffCall = useRpc(diffRpc);
-  const mergePreviewCall = useRpc(mergePreviewRpc);
-  const mergeApplyCall = useRpc(mergeApplyRpc);
-  const resolveCall = useRpc(driftResolveRpc);
-  const unignoreCall = useRpc(driftUnignoreRpc);
-  const pullCall = useRpc(workspacePullRpc);
-  const [diff, setDiff] = useState<AssetDiffResult | null>(null);
-  const [merge, setMerge] = useState<MergePreviewResult | null>(null);
-  const [mergeTarget, setMergeTarget] = useState<{
-    assetId: string;
-    path?: string;
-    provider?: string;
-  } | null>(null);
-  const [resolutions, setResolutions] = useState<
-    Record<string, MergeResolution>
-  >({});
-
-  if (!workspaceId) {
-    return <Text style={styles.warn}>该项目还没有 Workspace。</Text>;
-  }
-
-  const viewDiff = (item: DriftItem) =>
-    run("diff", async () => {
-      setMerge(null);
-      setDiff(
-        unwrap(
-          await diffCall({
-            projectId,
-            workspaceId,
-            assetId: item.assetId,
-            path: pathForItem(item),
-            provider: item.provider ?? undefined,
-          }),
-        ) as AssetDiffResult,
-      );
-    });
-
-  const openMerge = (item: DriftItem) =>
-    run("merge", async () => {
-      setDiff(null);
-      setResolutions({});
-      setMergeTarget({
-        assetId: item.assetId,
-        path: pathForItem(item),
-        provider: item.provider ?? undefined,
-      });
-      setMerge(
-        unwrap(
-          await mergePreviewCall({
-            projectId,
-            workspaceId,
-            assetId: item.assetId,
-            path: pathForItem(item),
-            provider: item.provider ?? undefined,
-          }),
-        ) as MergePreviewResult,
-      );
-    });
-
-  const applyMergeResult = () =>
-    run("merge-apply", async () => {
-      if (!merge) return;
-      const merged = unwrap(
-        await mergeApplyCall({
-          projectId,
-          workspaceId,
-          assetId: merge.assetId,
-          path: merge.repositoryPath,
-          resolutions: merge.conflicts.map(
-            (conflict) =>
-              resolutions[conflict.id] ?? {
-                conflictId: conflict.id,
-                choice: "local" as const,
-              },
-          ),
-          expectedLocalDigest: merge.expectedLocalDigest,
-          expectedRemoteDigest: merge.expectedRemoteDigest,
-        }),
-      );
-      setMerge(null);
-      setResolutions({});
-      setDiff(
-        unwrap(
-          await diffCall({
-            projectId,
-            workspaceId,
-            assetId: merged.assetId,
-            path: mergeTarget?.path ?? merged.repositoryPath,
-            provider: mergeTarget?.provider,
-          }),
-        ) as AssetDiffResult,
-      );
-      setMergeTarget(null);
-      onReload();
-    });
-
-  const act = (item: DriftItem, action: "overwrite" | "keep") =>
-    run(action, async () => {
-      unwrap(
-        await resolveCall({
-          projectId,
-          workspaceId,
-          assetId: item.assetId,
-          path: null,
-          provider: item.provider ?? undefined,
-          action,
-        }),
-      );
-      setDiff(null);
-      setMerge(null);
-      onReload();
-    });
-
-  return (
-    <View style={styles.card} testID="shared-assets-drift">
-      <View style={styles.spaceBetween}>
-        <Text style={styles.sectionTitle}>Drift 检测</Text>
-        <Button
-          label="从共享仓库刷新本地副本"
-          onPress={() =>
-            run("pull", async () => {
-              unwrap(await pullCall({ projectId, workspaceId }));
-              onReload();
-            })
-          }
-          styles={styles}
-          testID="shared-assets-workspace-pull"
-        />
-      </View>
-      <Text style={styles.label}>
-        对比本地副本、共享仓库与上次同步基线；本地改动不会被自动覆盖。
-      </Text>
-      {items.length === 0 ? (
-        <Text style={styles.empty}>还没有可跟踪的投影资产。</Text>
-      ) : null}
-      {items.map((item) => (
-        <View
-          key={`${item.assetId}/${item.provider ?? ""}`}
-          style={styles.listRow}
-          testID={`shared-assets-drift-${item.name}`}
-        >
-          <View style={styles.grow}>
-            <Text style={styles.value}>
-              {item.name}
-              <Text style={styles.label}>
-                {" "}
-                · {item.kind}
-                {item.provider ? ` · ${item.provider}` : ""}
-              </Text>
-            </Text>
-            <Text style={styles.mono}>{item.targetPath}</Text>
-            <Text style={styles.label}>
-              {item.files.length} 个文件
-              {item.files
-                .filter((file) => file.status !== "synced")
-                .slice(0, 3)
-                .map((file) => ` · ${file.path}`)
-                .join("")}
-            </Text>
-          </View>
-          <Badge
-            label={driftLabel(item.status)}
-            styles={styles}
-            tone={driftTone(item.status)}
-          />
-          {item.ignored ? (
-            <Button
-              label="取消忽略"
-              onPress={() =>
-                run("unignore", async () => {
-                  unwrap(
-                    await unignoreCall({
-                      projectId,
-                      workspaceId,
-                      assetId: item.assetId,
-                      path: null,
-                      provider: item.provider ?? undefined,
-                    }),
-                  );
-                  onReload();
-                })
-              }
-              styles={styles}
-            />
-          ) : (
-            <>
-              <Button
-                label="查看差异"
-                onPress={() => viewDiff(item)}
-                styles={styles}
-                testID={`shared-assets-diff-${item.name}`}
-              />
-              <Button
-                label="合并"
-                onPress={() => openMerge(item)}
-                styles={styles}
-                testID={`shared-assets-merge-${item.name}`}
-              />
-              <Button
-                label="覆盖本地"
-                onPress={() => act(item, "overwrite")}
-                styles={styles}
-              />
-              <Button
-                label="保留并忽略"
-                onPress={() => act(item, "keep")}
-                styles={styles}
-              />
-            </>
-          )}
-        </View>
-      ))}
-
-      {diff ? (
-        <View style={styles.monoBox}>
-          <Text style={styles.sectionTitle}>
-            {diff.assetId} {diff.path ? `· ${diff.path}` : ""}
-          </Text>
-          {diff.kind === "binary" ? (
-            <Text style={styles.warn}>二进制文件，仅支持覆盖或保留。</Text>
-          ) : (
-            <>
-              <Text style={styles.label}>基线 → 本地</Text>
-              <Text style={styles.mono} testID="shared-assets-diff-local">
-                {diff.localDiff || "(无变化)"}
-              </Text>
-              <Text style={styles.label}>基线 → 共享</Text>
-              <Text style={styles.mono} testID="shared-assets-diff-remote">
-                {diff.remoteDiff || "(无变化)"}
-              </Text>
-            </>
-          )}
-        </View>
-      ) : null}
-
-      {merge ? (
-        <View style={styles.monoBox} testID="shared-assets-merge-panel">
-          <Text style={styles.sectionTitle}>
-            三方合并 · {merge.repositoryPath}
-          </Text>
-          <Text style={styles.label}>
-            {merge.conflicts.length === 0
-              ? "无冲突，可直接应用自动合并结果。"
-              : `${merge.conflicts.length} 个冲突块，未全部选择前不能保存。`}
-          </Text>
-          {merge.conflicts.map((conflict) => {
-            const current = resolutions[conflict.id];
-            return (
-              <View key={conflict.id} style={styles.card}>
-                <Text style={styles.value}>冲突 {conflict.id}</Text>
-                <Text style={styles.label}>本地</Text>
-                <Text style={styles.mono}>{conflict.local}</Text>
-                <Text style={styles.label}>共享</Text>
-                <Text style={styles.mono}>{conflict.remote}</Text>
-                <View style={styles.row}>
-                  {(["local", "remote", "both", "custom"] as const).map(
-                    (choice) => (
-                      <Button
-                        key={choice}
-                        label={
-                          choice === "local"
-                            ? "采用本地"
-                            : choice === "remote"
-                              ? "采用共享"
-                              : choice === "both"
-                                ? "两者保留"
-                                : "自定义"
-                        }
-                        onPress={() =>
-                          setResolutions((value) => ({
-                            ...value,
-                            [conflict.id]: {
-                              conflictId: conflict.id,
-                              choice,
-                              content:
-                                choice === "custom"
-                                  ? (value[conflict.id]?.content ??
-                                    `${conflict.local}\n${conflict.remote}`)
-                                  : undefined,
-                            },
-                          }))
-                        }
-                        primary={current?.choice === choice}
-                        styles={styles}
-                        testID={`shared-assets-conflict-${conflict.id}-${choice}`}
-                      />
-                    ),
-                  )}
-                </View>
-                {current?.choice === "custom" ? (
-                  <TextInput
-                    value={current.content ?? ""}
-                    onChangeText={(content) =>
-                      setResolutions((value) => ({
-                        ...value,
-                        [conflict.id]: {
-                          conflictId: conflict.id,
-                          choice: "custom",
-                          content,
-                        },
-                      }))
-                    }
-                    multiline
-                    style={[styles.input, styles.textArea]}
-                  />
-                ) : null}
-              </View>
-            );
-          })}
-          <View style={styles.row}>
-            <Button
-              label={
-                merge.conflicts.length > 0 &&
-                merge.conflicts.some((conflict) => !resolutions[conflict.id])
-                  ? "还有冲突未解决"
-                  : "保存合并结果"
-              }
-              onPress={applyMergeResult}
-              disabled={
-                merge.conflicts.length > 0 &&
-                merge.conflicts.some((conflict) => !resolutions[conflict.id])
-              }
-              primary
-              styles={styles}
-              testID="shared-assets-merge-apply"
-            />
-            <Button
-              label="关闭"
-              onPress={() => setMerge(null)}
-              styles={styles}
-            />
-          </View>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function ChangesTab({
-  projectId,
-  workspaceId,
-  assets,
-  run,
-  onReload,
-  styles,
-}: {
-  projectId: string;
-  workspaceId: string | null;
-  assets: AssetSummary[];
-  run: RunAction;
-  onReload: () => void;
-  styles: Styles;
-}) {
-  const previewCall = useRpc(batchPublishPreviewRpc);
-  const commitCall = useRpc(batchPublishCommitRpc);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [preview, setPreview] = useState<BatchPublishPreview | null>(null);
-  const [result, setResult] = useState<BatchPublishResult | null>(null);
-
-  if (!workspaceId) {
-    return <Text style={styles.warn}>该项目还没有 Workspace。</Text>;
-  }
-  const toggle = (assetId: string) => {
-    setPreview(null);
-    setSelected((value) =>
-      value.includes(assetId)
-        ? value.filter((entry) => entry !== assetId)
-        : [...value, assetId],
-    );
-  };
-
-  const doPreview = () =>
-    run("batch-preview", async () => {
-      setResult(null);
-      setPreview(
-        unwrap(
-          await previewCall({
-            projectId,
-            workspaceId,
-            items: selected.map((assetId) => ({ assetId })),
-          }),
-        ) as BatchPublishPreview,
-      );
-    });
-
-  const doCommit = () =>
-    run("batch-publish", async () => {
-      if (!preview) return;
-      const value = unwrap(
-        await commitCall({
-          projectId,
-          workspaceId,
-          items: selected.map((assetId) => ({ assetId })),
-          expectedRevision: preview.expectedRevision,
-        }),
-      ) as BatchPublishResult;
-      setResult(value);
-      setPreview(null);
-      onReload();
-    });
-
-  const publishable =
-    preview?.items.filter(
-      (item) => item.state === "eligible" || item.state === "warning",
-    ).length ?? 0;
-
-  return (
-    <View style={styles.card} testID="shared-assets-changes">
-      <View style={styles.spaceBetween}>
-        <Text style={styles.sectionTitle}>选择性批量发布</Text>
-        <View style={styles.row}>
-          <Button
-            label="全选"
-            onPress={() => setSelected(assets.map((asset) => asset.assetId))}
-            styles={styles}
-          />
-          <Button
-            label="清空"
-            onPress={() => setSelected([])}
-            styles={styles}
-          />
-        </View>
-      </View>
-      <Text style={styles.label}>
-        只发布勾选的资产；逐项校验，部分失败不阻断其余项；有未解决冲突的资产会被拒绝。
-      </Text>
-      {assets.map((asset) => {
-        const checked = selected.includes(asset.assetId);
-        return (
-          <Pressable
-            key={asset.assetId}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked }}
-            onPress={() => toggle(asset.assetId)}
-            style={styles.listRow}
-            testID={`shared-assets-select-${asset.name}`}
-          >
-            <View
-              style={{
-                width: 16,
-                height: 16,
-                borderRadius: 3,
-                borderWidth: 1,
-                borderColor: checked ? styles.ok.color : styles.label.color,
-                backgroundColor: checked ? styles.ok.color : "transparent",
-              }}
-            />
-            <View style={styles.grow}>
-              <Text style={styles.value}>
-                {asset.name} <Text style={styles.label}>· {asset.kind}</Text>
-              </Text>
-              <Text style={styles.label}>
-                {asset.path} · {asset.fileCount} 个文件
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
-      <View style={styles.row}>
-        <Button
-          label="校验选中"
-          onPress={doPreview}
-          disabled={selected.length === 0}
-          primary
-          styles={styles}
-          testID="shared-assets-batch-preview"
-        />
-        <Button
-          label={`发布选中（${publishable} 项可发布）`}
-          onPress={doCommit}
-          disabled={!preview || publishable === 0}
-          styles={styles}
-          testID="shared-assets-batch-commit"
-        />
-      </View>
-      {preview ? (
-        <View style={styles.monoBox}>
-          <Text style={styles.label}>
-            基线 revision {preview.expectedRevision.slice(0, 8)}
-          </Text>
-          {preview.items.map((item) => (
-            <View key={item.assetId} style={styles.listRow}>
-              <View style={styles.grow}>
-                <Text style={styles.value}>
-                  {item.name} · {item.state}
-                </Text>
-                {item.reasons.map((reason) => (
-                  <Text key={reason.code} style={styles.error}>
-                    {reason.code}: {reason.message}
-                  </Text>
-                ))}
-                <Text style={styles.mono}>
-                  {item.diff.slice(0, 2000) || "(无差异)"}
-                </Text>
-              </View>
-            </View>
-          ))}
-          {preview.skipped.map((entry) => (
-            <Text key={entry.assetId} style={styles.warn}>
-              {entry.assetId}: {entry.reason}
-            </Text>
-          ))}
-        </View>
-      ) : null}
-      {result ? (
-        <View style={styles.monoBox} testID="shared-assets-batch-result">
-          <Text style={styles.value}>
-            {result.commit
-              ? `已提交 ${result.commit.slice(0, 8)}`
-              : "没有写入提交"}
-          </Text>
-          <Text style={styles.ok}>
-            成功 {result.published.length} · 失败 {result.failed.length} · 跳过{" "}
-            {result.skipped.length}
-          </Text>
-          {result.published.map((entry) => (
-            <Text key={`ok-${entry.assetId}`} style={styles.ok}>
-              {entry.assetId}: {entry.files.join(", ")}
-            </Text>
-          ))}
-          {result.failed.map((entry) => (
-            <Text key={`fail-${entry.assetId}`} style={styles.error}>
-              {entry.assetId}: {entry.reason}
-            </Text>
-          ))}
-          <Text style={styles.label}>{result.pushHint}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function SettingsTab({
-  projectId,
-  workspaceId,
-  run,
-  styles,
-}: {
-  projectId: string;
-  workspaceId: string | null;
-  run: RunAction;
-  styles: Styles;
-}) {
-  const providersCall = useRpc(providersListRpc);
-  const ignoreGet = useRpc(ignoreRulesGetRpc);
-  const ignoreSet = useRpc(ignoreRulesSetRpc);
-  const migrateCall = useRpc(migrateLegacyRpc);
-  const [providers, setProviders] = useState<ProviderStatus[]>([]);
-  const [raw, setRaw] = useState("");
-  const [ignoreResult, setIgnoreResult] = useState<IgnoreRulesResult | null>(
-    null,
-  );
-  const [migration, setMigration] = useState<MigrationReport | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void providersCall({})
-      .then(unwrap)
-      .then((value) => {
-        if (!cancelled) setProviders(value as ProviderStatus[]);
-      })
-      .catch(() => {});
-    void ignoreGet({ projectId })
-      .then(unwrap)
-      .then((value) => {
-        if (cancelled) return;
-        setRaw(value.raw);
-        setIgnoreResult(value as IgnoreRulesResult);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [ignoreGet, projectId, providersCall]);
-
-  return (
-    <View style={styles.detail}>
-      <View style={styles.card} testID="shared-assets-providers">
-        <Text style={styles.sectionTitle}>Provider 矩阵</Text>
-        <Text style={styles.label}>
-          只有已验证的目录才会默认启用；未验证项会明确标注。
-        </Text>
-        {providers.map((provider) => (
-          <View key={provider.id} style={styles.listRow}>
-            <View style={styles.grow}>
-              <Text style={styles.value}>{provider.label}</Text>
-              <Text style={styles.mono}>
-                skill: {provider.skillRoot ?? "不投影"} · prompt:{" "}
-                {provider.instructionEntrypoint ?? "不投影"}
-              </Text>
-              <Text style={styles.label}>{provider.note}</Text>
-            </View>
-            <Badge
-              label={provider.installed ? "已安装" : "未安装"}
-              styles={styles}
-              tone={provider.installed ? "ok" : undefined}
-            />
-            <Badge
-              label={provider.skillVerified ? "已验证" : "未验证"}
-              styles={styles}
-              tone={provider.skillVerified ? "ok" : "warn"}
-            />
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.card} testID="shared-assets-ignore">
-        <Text style={styles.sectionTitle}>Ignore 规则</Text>
-        <Text style={styles.label}>
-          每行一条：path:&lt;glob&gt;、kind:&lt;skill|prompt|knowledge|doc&gt;、
-          asset:&lt;assetId&gt;，也可以直接写路径。保存会提交到共享仓库。
-        </Text>
-        <TextInput
-          value={raw}
-          onChangeText={setRaw}
-          multiline
-          style={[styles.input, styles.textArea]}
-          testID="shared-assets-ignore-input"
-        />
-        {ignoreResult?.errors.map((error) => (
-          <Text key={`${error.line}-${error.message}`} style={styles.error}>
-            第 {error.line} 行：{error.message}
-          </Text>
-        ))}
-        <View style={styles.row}>
-          <Button
-            label="保存规则"
-            primary
-            onPress={() =>
-              run("ignore-save", async () => {
-                const value = unwrap(
-                  await ignoreSet({ projectId, raw }),
-                ) as IgnoreRulesResult & { commit: string | null };
-                setIgnoreResult(value);
-                setRaw(value.raw);
-              })
-            }
-            styles={styles}
-            testID="shared-assets-ignore-save"
-          />
-        </View>
-      </View>
-
-      <View style={styles.card} testID="shared-assets-migration">
-        <Text style={styles.sectionTitle}>.agentstorm/ 一次性迁移</Text>
-        <Text style={styles.label}>
-          只读导入 AGENTS.md、knowledge、docs 到共享 checkout；workflows
-          跳过，源目录不删除，冲突项不覆盖。
-        </Text>
-        <View style={styles.row}>
-          <Button
-            label="预览迁移"
-            onPress={() =>
-              run("migrate-preview", async () => {
-                if (!workspaceId) throw new Error("该项目还没有 Workspace");
-                setMigration(
-                  unwrap(
-                    await migrateCall({
-                      projectId,
-                      workspaceId,
-                      dryRun: true,
-                    }),
-                  ) as MigrationReport,
-                );
-              })
-            }
-            disabled={!workspaceId}
-            primary
-            styles={styles}
-            testID="shared-assets-migrate-preview"
-          />
-          <Button
-            label="执行导入"
-            onPress={() =>
-              run("migrate-apply", async () => {
-                if (!workspaceId) throw new Error("该项目还没有 Workspace");
-                setMigration(
-                  unwrap(
-                    await migrateCall({
-                      projectId,
-                      workspaceId,
-                      dryRun: false,
-                    }),
-                  ) as MigrationReport,
-                );
-              })
-            }
-            disabled={
-              !workspaceId ||
-              !migration ||
-              !migration.files.some((file) => file.action === "import")
-            }
-            styles={styles}
-            testID="shared-assets-migrate-apply"
-          />
-        </View>
-        {migration ? (
-          <View style={styles.monoBox}>
-            <Text style={styles.value}>
-              {migration.dryRun
-                ? "预览"
-                : migration.applied
-                  ? "已导入"
-                  : "无变更"}
-              {migration.reused ? "（源未变化，复用上次结果）" : ""}
-            </Text>
-            <Text style={styles.label}>
-              源：{migration.before.files} 个文件 / {migration.before.bytes}{" "}
-              bytes → 目标：{migration.after.files} 个文件 /{" "}
-              {migration.after.bytes} bytes
-            </Text>
-            {migration.files.map((file) => (
-              <Text
-                key={`${file.sourcePath}-${file.repositoryPath}`}
-                style={
-                  file.action === "conflict"
-                    ? styles.error
-                    : file.action === "import"
-                      ? styles.ok
-                      : styles.label
-                }
-              >
-                {file.action}: {file.sourcePath} → {file.repositoryPath}
-                {file.reason ? `（${file.reason}）` : ""}
-              </Text>
-            ))}
-            {migration.skipped.map((entry) => (
-              <Text key={`skip-${entry.path}`} style={styles.warn}>
-                跳过 {entry.path}：{entry.reason}
-              </Text>
-            ))}
-            {migration.candidates.skills.length > 0 ? (
-              <Text style={styles.label}>
-                可发布 Skill 候选：{migration.candidates.skills.join(", ")}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function ProjectDetail({
-  project,
-  onBack,
-  onChanged,
-  styles,
-}: {
-  project: ProjectSummary;
-  onBack: () => void;
-  onChanged: () => void;
-  styles: Styles;
-}) {
-  const statusCall = useRpc(statusRpc);
-  const assetsCall = useRpc(assetsListRpc);
-  const skillsCall = useRpc(skillsListRpc);
-  const instructionsCall = useRpc(instructionsStatusRpc);
-  const instructionsSet = useRpc(instructionsSetEnabledRpc);
-  const skillsSet = useRpc(skillsSetEnabledRpc);
-  const syncCall = useRpc(syncRpc);
-  const unbindCall = useRpc(unbindRpc);
-  const readCall = useRpc(assetReadRpc);
-  const driftCall = useRpc(driftListRpc);
-
-  const [workspaceId, setWorkspaceId] = useState<string | null>(
-    project.workspaces.find((entry) => !entry.background)?.workspaceId ??
-      project.workspaces[0]?.workspaceId ??
-      null,
-  );
-  const [tab, setTab] = useState<Tab>("skills");
-  const [configuring, setConfiguring] = useState(false);
-  const [confirmUnbind, setConfirmUnbind] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [status, setStatus] = useState<StatusResult | null>(null);
-  const [assets, setAssets] = useState<AssetSummary[]>([]);
-  const [skills, setSkills] = useState<SkillListResult | null>(null);
-  const [instructions, setInstructions] =
-    useState<InstructionStatusResult | null>(null);
-  const [promptContent, setPromptContent] = useState<string | null>(null);
-  const [drift, setDrift] = useState<DriftItem[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const reload = useCallback(() => setRefreshKey((value) => value + 1), []);
-
-  useEffect(() => {
-    if (!project.bound) {
-      setStatus(null);
-      setAssets([]);
-      setSkills(null);
-      setInstructions(null);
-      setPromptContent(null);
-      setDrift([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [statusValue, assetsValue, skillsValue, driftValue] =
-          await Promise.all([
-            loadStatus(statusCall, project.projectId),
-            assetsCall({ projectId: project.projectId }).then(unwrap),
-            workspaceId
-              ? skillsCall({ projectId: project.projectId, workspaceId }).then(
-                  unwrap,
-                )
-              : Promise.resolve(null),
-            workspaceId
-              ? driftCall({ projectId: project.projectId, workspaceId }).then(
-                  unwrap,
-                )
-              : Promise.resolve([]),
-          ]);
-        if (cancelled) return;
-        setStatus(statusValue);
-        setAssets(assetsValue);
-        setSkills(skillsValue as SkillListResult | null);
-        setDrift(driftValue as DriftItem[]);
-        setError(null);
-        if (workspaceId) {
-          const [instructionValue, prompt] = await Promise.all([
-            instructionsCall({
-              projectId: project.projectId,
-              workspaceId,
-            }).then(unwrap),
-            readCall({ projectId: project.projectId, assetId: "prompt" })
-              .then(unwrap)
-              .then((result: AssetReadResult) => result.content)
-              .catch(() => null),
-          ]);
-          if (cancelled) return;
-          setInstructions(instructionValue as InstructionStatusResult);
-          setPromptContent(prompt);
-        } else {
-          setInstructions(null);
-          setPromptContent(null);
-        }
-      } catch (value) {
-        if (!cancelled) setError(messageOf(value));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    assetsCall,
-    driftCall,
-    instructionsCall,
-    project.bound,
-    project.projectId,
-    readCall,
-    refreshKey,
-    skillsCall,
-    statusCall,
-    workspaceId,
-  ]);
-
-  const action = async (label: string, work: () => Promise<void>) => {
-    setBusy(label);
-    setError(null);
-    setNotice(null);
-    try {
-      await work();
-    } catch (value) {
-      setError(messageOf(value));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const toggleSkill = (assetId: string, enabled: boolean, provider = "both") =>
-    action(enabled ? "启用 Skill" : "停用 Skill", async () => {
-      if (!workspaceId) throw new Error("该项目还没有 Workspace");
-      const result = unwrap(
-        await skillsSet({
-          projectId: project.projectId,
-          workspaceId,
-          assetId,
-          provider,
-          enabled,
-        }),
-      );
-      const kept = result.kept.map((entry) => entry.targetPath);
-      const errors = result.errors.map(
-        (entry) => `${entry.provider}: ${entry.message}`,
-      );
-      if (errors.length > 0) setError(errors.join("\n"));
-      if (kept.length > 0) setNotice(`已保留本地修改：${kept.join(", ")}`);
-      reload();
-    });
-
-  const toggleInstructions = (provider: string, enabled: boolean) =>
-    action(enabled ? "投影指令" : "停用指令投影", async () => {
-      if (!workspaceId) throw new Error("该项目还没有 Workspace");
-      const result = unwrap(
-        await instructionsSet({
-          projectId: project.projectId,
-          workspaceId,
-          provider,
-          enabled,
-        }),
-      );
-      if (result.kept.length > 0) {
-        setNotice(
-          `已保留：${result.kept.map((entry) => entry.targetPath).join(", ")}`,
-        );
-      }
-      reload();
-    });
-
-  return (
-    <View style={styles.detail}>
-      <View style={styles.headerRow}>
-        <View style={styles.grow}>
-          <Text style={styles.title}>{project.displayName}</Text>
-          <Text style={styles.subtitle}>{project.rootPath}</Text>
-        </View>
-        <Button label="返回项目列表" onPress={onBack} styles={styles} />
-      </View>
-
-      {project.workspaces.length > 1 ? (
-        <View style={styles.row}>
-          <Text style={styles.label}>Workspace</Text>
-          {project.workspaces.map((workspace) => (
-            <Button
-              key={workspace.workspaceId}
-              label={workspace.name}
-              onPress={() => setWorkspaceId(workspace.workspaceId)}
-              primary={workspaceId === workspace.workspaceId}
-              styles={styles}
-            />
-          ))}
-        </View>
-      ) : project.workspaces[0] ? (
-        <Text style={styles.label}>
-          投影目录：{project.workspaces[0].directory}
-        </Text>
-      ) : (
-        <Text style={styles.warn}>
-          该项目尚无 Workspace；绑定可用，但投影需要 Workspace。
-        </Text>
-      )}
-
-      {configuring || !project.bound ? (
-        <ConfigureForm
-          project={project}
-          onCancel={() => setConfiguring(false)}
-          onDone={() => {
-            setConfiguring(false);
-            reload();
-            onChanged();
-          }}
-          styles={styles}
-        />
-      ) : (
-        <StatusCard
-          project={project}
-          status={status}
-          busy={busy}
-          onSync={() =>
-            action("sync", async () => {
-              const result = unwrap(
-                await syncCall({ projectId: project.projectId }),
-              );
-              setNotice(
-                result.changed
-                  ? "已同步到远端最新提交。"
-                  : "已是最新，无需更新。",
-              );
-              reload();
-            })
-          }
-          onUnbind={() =>
-            action("unbind", async () => {
-              setConfirmUnbind(false);
-              const result = unwrap(
-                await unbindCall({ projectId: project.projectId }),
-              );
-              setNotice(
-                `已解绑。移除受管投影 ${result.removedProjections.length} 项；保留 ${result.preserved.length} 项本地修改。项目文件未被删除。`,
-              );
-              reload();
-              onChanged();
-            })
-          }
-          unbindArmed={confirmUnbind}
-          onArmUnbind={() => setConfirmUnbind(true)}
-          onConfigure={() => setConfiguring(true)}
-          styles={styles}
-        />
-      )}
-
-      {busy ? <ActivityIndicator /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {notice ? <Text style={styles.ok}>{notice}</Text> : null}
-
-      {project.bound ? (
-        <>
-          <View style={styles.tabRow}>
-            {(
-              [
-                "skills",
-                "prompt",
-                "knowledge",
-                "docs",
-                "changes",
-                "drift",
-                "settings",
-              ] as const
-            ).map((value) => (
-              <Pressable
-                key={value}
-                accessibilityRole="tab"
-                onPress={() => setTab(value)}
-                style={[styles.tab, tab === value ? styles.tabActive : null]}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    tab === value ? styles.tabTextActive : null,
-                  ]}
-                >
-                  {value === "skills"
-                    ? "Skills"
-                    : value === "prompt"
-                      ? "SYSTEM Prompt"
-                      : value === "knowledge"
-                        ? "Knowledge"
-                        : value === "docs"
-                          ? "Docs"
-                          : value === "changes"
-                            ? "变更 / 发布"
-                            : value === "drift"
-                              ? "Drift"
-                              : "设置"}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          {tab === "skills" ? (
-            <SkillsTab
-              data={skills}
-              workspaceDirectory={
-                project.workspaces.find(
-                  (entry) => entry.workspaceId === workspaceId,
-                )?.directory ?? null
-              }
-              busy={busy}
-              onToggle={toggleSkill}
-              styles={styles}
-            />
-          ) : null}
-          {tab === "prompt" ? (
-            <PromptTab
-              project={project}
-              status={instructions}
-              workspaceId={workspaceId}
-              content={promptContent}
-              busy={busy}
-              onToggle={toggleInstructions}
-              styles={styles}
-            />
-          ) : null}
-          {tab === "knowledge" ? (
-            <KnowledgeTab
-              projectId={project.projectId}
-              assets={assets}
-              styles={styles}
-            />
-          ) : null}
-          {tab === "docs" ? (
-            <DocsTab
-              projectId={project.projectId}
-              assets={assets}
-              styles={styles}
-            />
-          ) : null}
-          {tab === "changes" ? (
-            <ChangesTab
-              projectId={project.projectId}
-              workspaceId={workspaceId}
-              assets={assets}
-              run={action}
-              onReload={reload}
-              styles={styles}
-            />
-          ) : null}
-          {tab === "drift" ? (
-            <DriftTab
-              projectId={project.projectId}
-              workspaceId={workspaceId}
-              items={drift}
-              run={action}
-              onReload={reload}
-              styles={styles}
-            />
-          ) : null}
-          {tab === "settings" ? (
-            <SettingsTab
-              projectId={project.projectId}
-              workspaceId={workspaceId}
-              run={action}
-              styles={styles}
-            />
-          ) : null}
-        </>
-      ) : null}
-    </View>
-  );
-}
-
-export function SharedAssetsScreen(props: PluginScreenProps) {
-  const styles = useMemo(
-    () => makeStyles(props.theme, props.layout.compact),
-    [props.theme, props.layout.compact],
-  );
+export function SharedAssetsScreen({
+  theme,
+  layout,
+  host,
+  params,
+}: PluginScreenProps) {
+  const tokens = useMemo(() => createTokens(theme), [theme]);
+  const compact = layout.compact;
   const projectsCall = useRpc(projectsListRpc);
+  const driftIgnoreCall = useRpc(driftIgnoreRpc);
+  const driftUnignoreCall = useRpc(driftUnignoreRpc);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [projectId, setProjectId] = useState<string | null>(
-    props.params.projectId ?? null,
+  const [selectedId, setSelectedId] = useState<string | null>(
+    params.projectId ?? null,
   );
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [ignoredOpen, setIgnoredOpen] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    setRefreshKey((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2245,7 +263,7 @@ export function SharedAssetsScreen(props: PluginScreenProps) {
       .then(unwrap)
       .then((value) => {
         if (cancelled) return;
-        setProjects(value);
+        setProjects(value as ProjectSummary[]);
         setError(null);
       })
       .catch((value) => {
@@ -2259,61 +277,4023 @@ export function SharedAssetsScreen(props: PluginScreenProps) {
     };
   }, [projectsCall, refreshKey]);
 
-  const project =
-    projects.find((entry) => entry.projectId === projectId) ?? null;
+  const selected = projects.find((entry) => entry.projectId === selectedId);
+
+  const setIgnored = async (
+    project: ProjectSummary,
+    item: ProjectAttentionItem,
+    ignored: boolean,
+  ) => {
+    if (!project.workspaceId) return;
+    setBusyKey(attentionKey(item));
+    setError(null);
+    try {
+      if (ignored) {
+        unwrap(
+          await driftIgnoreCall({
+            projectId: project.projectId,
+            workspaceId: project.workspaceId,
+            assetId:
+              item.kind === "prompt"
+                ? "prompt"
+                : item.kind === "knowledge"
+                  ? `knowledge/${item.name}.md`
+                  : item.kind === "doc"
+                    ? `doc/${item.name}`
+                    : `skill:project/${item.name}`,
+            path: null,
+            provider: item.provider ?? undefined,
+            reason: ATTENTION_LABELS[item.reason],
+          }),
+        );
+      } else {
+        unwrap(
+          await driftUnignoreCall({
+            projectId: project.projectId,
+            workspaceId: project.workspaceId,
+            assetId:
+              item.kind === "prompt"
+                ? "prompt"
+                : item.kind === "knowledge"
+                  ? `knowledge/${item.name}.md`
+                  : item.kind === "doc"
+                    ? `doc/${item.name}`
+                    : `skill:project/${item.name}`,
+            path: null,
+            provider: item.provider ?? undefined,
+          }),
+        );
+      }
+      refresh();
+    } catch (value) {
+      setError(messageOf(value));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  if (selected) {
+    return (
+      <ProjectDetail
+        project={selected}
+        tokens={tokens}
+        compact={compact}
+        onBack={() => {
+          setSelectedId(null);
+          refresh();
+        }}
+        onChanged={refresh}
+      />
+    );
+  }
+
+  const stats = {
+    total: projects.length,
+    configured: projects.filter((project) => project.bound).length,
+    withUpdate: projects.filter(
+      (project) =>
+        project.attention.items.some(
+          (item) => !item.ignored && item.reason === "remote-update",
+        ) || (project.state?.behind ?? 0) > 0,
+    ).length,
+    withChanges: projects.filter((project) =>
+      project.attention.items.some(
+        (item) =>
+          !item.ignored &&
+          (item.reason === "local-update" ||
+            item.reason === "unpublished-local"),
+      ),
+    ).length,
+    withConflicts: projects.filter((project) =>
+      project.attention.items.some(
+        (item) => !item.ignored && item.reason === "diverged",
+      ),
+    ).length,
+  };
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
+    <View
+      style={{ flex: 1, backgroundColor: tokens.colors.surfaceWorkspace }}
       testID="shared-assets-screen"
     >
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {loading ? <ActivityIndicator /> : null}
-      {!loading && project ? (
-        <ProjectDetail
-          project={project}
-          onBack={() => setProjectId(null)}
-          onChanged={() => setRefreshKey((value) => value + 1)}
-          styles={styles}
-        />
-      ) : null}
-      {!loading && !project ? (
-        <View style={styles.detail}>
-          <Text style={styles.title}>项目</Text>
-          <Text style={styles.subtitle}>
-            团队 Git 仓库中的 Skill、AGENTS.md、Knowledge 与
-            Doc，投影到当前项目。
-          </Text>
-          {projects.length === 0 ? (
-            <Text style={styles.empty}>Paseo 中还没有 Project。</Text>
-          ) : null}
-          {projects.map((entry) => (
-            <Pressable
-              key={entry.projectId}
-              accessibilityRole="button"
-              onPress={() => setProjectId(entry.projectId)}
-              style={styles.card}
+      <ScrollView
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{
+          padding: compact ? 16 : 28,
+          paddingBottom: 48,
+          gap: 16,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: compact ? "column" : "row",
+            alignItems: compact ? "stretch" : "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <View style={{ flexShrink: 1, gap: 4 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: compact ? 22 : 26,
+                fontWeight: "600",
+              }}
             >
-              <View style={styles.spaceBetween}>
-                <Text style={styles.sectionTitle}>{entry.displayName}</Text>
-                <Badge
-                  label={entry.bound ? "已绑定" : "未绑定"}
-                  styles={styles}
-                  tone={entry.bound ? "ok" : undefined}
+              按项目管理的团队资产
+            </Text>
+            <Muted tokens={tokens}>
+              Workflow、Skill、SYSTEM Prompt
+              与经验库以项目为作用域；同一项目下的工作区共用一套共享库。
+            </Muted>
+          </View>
+          <IconButton
+            icon="RefreshCw"
+            label="刷新项目状态"
+            onPress={() => {
+              setLoading(true);
+              refresh();
+            }}
+            disabled={loading}
+            tokens={tokens}
+            testID="shared-assets-refresh"
+          />
+        </View>
+
+        {error ? (
+          <Alert
+            tone="danger"
+            title="共享资产操作失败"
+            description={error}
+            tokens={tokens}
+          />
+        ) : null}
+
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: compact ? 8 : 12,
+          }}
+        >
+          <StatCard
+            label="项目"
+            value={stats.total}
+            tokens={tokens}
+            compact={compact}
+          />
+          <StatCard
+            label="已连接共享库"
+            value={stats.configured}
+            tokens={tokens}
+            compact={compact}
+          />
+          <StatCard
+            label="远端有更新"
+            value={stats.withUpdate}
+            tokens={tokens}
+            compact={compact}
+          />
+          <StatCard
+            label="本地未发布"
+            value={stats.withChanges}
+            tokens={tokens}
+            compact={compact}
+          />
+          <StatCard
+            label="冲突"
+            value={stats.withConflicts}
+            tokens={tokens}
+            compact={compact}
+          />
+        </View>
+
+        {loading && projects.length === 0 ? <Spinner tokens={tokens} /> : null}
+        {!loading && projects.length === 0 ? (
+          <View style={{ paddingVertical: 48, gap: 8 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize["2xl"],
+                fontWeight: "600",
+              }}
+            >
+              还没有项目
+            </Text>
+            <Muted tokens={tokens}>
+              先在侧边栏添加一个项目，再为它连接团队共享 Git 仓库。
+            </Muted>
+          </View>
+        ) : null}
+
+        {projects.map((project) => {
+          const attention = project.attention.items.filter(
+            (item) => !item.ignored,
+          );
+          const ignored = project.attention.items.filter(
+            (item) => item.ignored,
+          );
+          const ready = project.bound && project.workspaceId;
+          return (
+            <View
+              key={project.projectId}
+              style={{
+                flexDirection: compact ? "column" : "row",
+                alignItems: compact ? "stretch" : "center",
+                gap: 12,
+                borderWidth: 1,
+                borderColor: tokens.colors.border,
+                backgroundColor: tokens.colors.surface1,
+                borderRadius: tokens.radius.xl,
+                padding: compact ? 12 : 16,
+              }}
+              testID={`shared-assets-project-${project.projectId}`}
+            >
+              <View
+                style={{
+                  width: compact ? 32 : 38,
+                  height: compact ? 32 : 38,
+                  borderRadius: tokens.radius.lg,
+                  backgroundColor: `${tokens.colors.accent}18`,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Icon
+                  name="LibraryBig"
+                  size={compact ? 16 : 18}
+                  color={tokens.colors.accent}
                 />
               </View>
-              <Text style={styles.label}>{entry.rootPath}</Text>
-              <Text style={styles.label}>
-                {entry.workspaces.length} 个 Workspace
-                {entry.bound
-                  ? ` · ${entry.syncMode === "auto" ? "自动同步" : "手动同步"}`
-                  : ""}
+              <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: tokens.colors.foreground,
+                      fontSize: tokens.fontSize["2xl"],
+                      fontWeight: "600",
+                    }}
+                  >
+                    {project.displayName}
+                  </Text>
+                  <Text
+                    style={{
+                      color: tokens.colors.foreground,
+                      fontSize: tokens.fontSize.base,
+                    }}
+                  >
+                    {host.label}
+                  </Text>
+                  {attention.length > 0 ? (
+                    <View
+                      style={{
+                        minWidth: 20,
+                        height: 20,
+                        paddingHorizontal: 6,
+                        borderRadius: 10,
+                        backgroundColor: attention.some(
+                          (item) => item.reason === "diverged",
+                        )
+                          ? tokens.colors.danger
+                          : tokens.colors.accent,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      accessibilityLabel={`${attention.length} 项需要处理`}
+                      testID={`shared-assets-attention-${project.projectId}`}
+                    >
+                      <Text
+                        style={{
+                          color: tokens.colors.accentForeground,
+                          fontSize: tokens.fontSize.xs,
+                          fontWeight: "600",
+                        }}
+                      >
+                        {attention.length}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Muted tokens={tokens}>{project.rootPath}</Muted>
+                <Text
+                  style={{
+                    color: tokens.colors.foreground,
+                    fontSize: tokens.fontSize.sm,
+                  }}
+                >
+                  {syncSummary(project)}
+                  {project.repoUrl ? ` · ${project.repoUrl}` : ""}
+                </Text>
+                <View
+                  style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}
+                >
+                  {attention.length > 0 ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() =>
+                        setExpanded((value) => ({
+                          ...value,
+                          [project.projectId]: !value[project.projectId],
+                        }))
+                      }
+                      testID={`shared-assets-attention-toggle-${project.projectId}`}
+                    >
+                      <Text
+                        style={{
+                          color: tokens.colors.accent,
+                          fontSize: tokens.fontSize.sm,
+                        }}
+                      >
+                        {expanded[project.projectId] ? "收起明细" : "查看明细"}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {ignored.length > 0 ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() =>
+                        setIgnoredOpen((value) => ({
+                          ...value,
+                          [project.projectId]: !value[project.projectId],
+                        }))
+                      }
+                      testID={`shared-assets-ignored-toggle-${project.projectId}`}
+                    >
+                      <Text
+                        style={{
+                          color: tokens.colors.foregroundMuted,
+                          fontSize: tokens.fontSize.sm,
+                        }}
+                      >
+                        {ignoredOpen[project.projectId]
+                          ? "收起已忽略"
+                          : `已忽略 ${ignored.length}`}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                {expanded[project.projectId] ? (
+                  <AttentionList
+                    items={attention}
+                    tokens={tokens}
+                    compact={compact}
+                    busyKey={busyKey}
+                    onToggle={(item) => void setIgnored(project, item, true)}
+                  />
+                ) : null}
+                {ignoredOpen[project.projectId] ? (
+                  <AttentionList
+                    items={ignored}
+                    tokens={tokens}
+                    compact={compact}
+                    restore
+                    busyKey={busyKey}
+                    onToggle={(item) => void setIgnored(project, item, false)}
+                  />
+                ) : null}
+                {!project.workspaceId ? (
+                  <Text
+                    style={{
+                      color: tokens.colors.warning,
+                      fontSize: tokens.fontSize.sm,
+                    }}
+                  >
+                    该项目还没有工作区，先创建一个工作区再配置共享资产
+                  </Text>
+                ) : null}
+              </View>
+              <Button
+                tokens={tokens}
+                size={compact ? "md" : "sm"}
+                variant={ready ? "ghost" : "default"}
+                disabled={!project.workspaceId}
+                onPress={() => setSelectedId(project.projectId)}
+                accessibilityLabel={`${ready ? "管理" : "配置"} ${project.displayName} 的共享资产`}
+              >
+                {ready ? "管理" : "配置"}
+              </Button>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function AttentionList({
+  items,
+  tokens,
+  compact,
+  restore,
+  busyKey,
+  onToggle,
+}: {
+  items: ProjectAttentionItem[];
+  tokens: Tokens;
+  compact: boolean;
+  restore?: boolean;
+  busyKey: string | null;
+  onToggle: (item: ProjectAttentionItem) => void;
+}) {
+  return (
+    <View
+      style={{
+        marginTop: 4,
+        borderTopWidth: 1,
+        borderTopColor: tokens.colors.border,
+        paddingTop: 6,
+        gap: 2,
+      }}
+    >
+      {items.map((item) => {
+        const key = attentionKey(item);
+        return (
+          <View
+            key={key}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingVertical: 3,
+            }}
+          >
+            <View
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 4,
+                backgroundColor:
+                  item.reason === "diverged"
+                    ? tokens.colors.danger
+                    : item.reason === "remote-update"
+                      ? tokens.colors.accent
+                      : tokens.colors.warning,
+              }}
+            />
+            <Text
+              style={{
+                color: tokens.colors.foregroundMuted,
+                fontSize: tokens.fontSize.xs,
+                width: 84,
+              }}
+              numberOfLines={1}
+            >
+              {KIND_LABELS[item.kind]}
+            </Text>
+            {!compact && item.provider ? (
+              <Text
+                style={{
+                  color: tokens.colors.foregroundMuted,
+                  fontSize: tokens.fontSize.xs,
+                  width: 64,
+                }}
+                numberOfLines={1}
+              >
+                {item.provider}
+              </Text>
+            ) : null}
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.sm,
+                flex: 1,
+                minWidth: 0,
+              }}
+              numberOfLines={1}
+              ellipsizeMode="middle"
+            >
+              {item.name}
+            </Text>
+            <Text
+              style={{
+                color: tokens.colors.foregroundMuted,
+                fontSize: tokens.fontSize.xs,
+              }}
+            >
+              {ATTENTION_LABELS[item.reason]}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busyKey === key}
+              onPress={() => onToggle(item)}
+              testID={`shared-assets-attention-ignore-${key}`}
+            >
+              <Text
+                style={{
+                  color: tokens.colors.accent,
+                  fontSize: tokens.fontSize.xs,
+                }}
+              >
+                {restore ? "恢复" : "忽略"}
               </Text>
             </Pressable>
-          ))}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function ProjectDetail({
+  project,
+  tokens,
+  compact,
+  onBack,
+  onChanged,
+}: {
+  project: ProjectSummary;
+  tokens: Tokens;
+  compact: boolean;
+  onBack: () => void;
+  onChanged: () => void;
+}) {
+  const statusCall = useRpc(statusRpc);
+  const syncCall = useRpc(syncRpc);
+  const unbindCall = useRpc(unbindRpc);
+  const configureCall = useRpc(configureRpc);
+  const driftCall = useRpc(driftListRpc);
+  const driftIgnoreCall = useRpc(driftIgnoreRpc);
+  const driftUnignoreCall = useRpc(driftUnignoreRpc);
+  const driftResolveCall = useRpc(driftResolveRpc);
+  const providersCall = useRpc(providersListRpc);
+  const relationshipsCall = useRpc(relationshipsListRpc);
+  const relationshipsAdoptCall = useRpc(relationshipsAdoptRpc);
+  const relationshipsUnlinkCall = useRpc(relationshipsUnlinkRpc);
+  const relationshipsBatchUnlinkCall = useRpc(relationshipsBatchUnlinkRpc);
+  const skillsSetEnabledCall = useRpc(skillsSetEnabledRpc);
+  const instructionsSetCall = useRpc(instructionsSetEnabledRpc);
+  const assetReadCall = useRpc(assetReadRpc);
+  const diffCall = useRpc(diffRpc);
+  const mergePreviewCall = useRpc(mergePreviewRpc);
+  const mergeApplyCall = useRpc(mergeApplyRpc);
+  const batchPreviewCall = useRpc(batchPublishPreviewRpc);
+  const batchCommitCall = useRpc(batchPublishCommitRpc);
+  const workspacePullCall = useRpc(workspacePullRpc);
+  const [status, setStatus] = useState<Binding | null>(null);
+  const [drift, setDrift] = useState<DriftItem[]>([]);
+  const [providers, setProviders] = useState<ProviderStatus[]>([]);
+  const [tab, setTab] = useState<Tab>("skills");
+  const [provider, setProvider] = useState("codex");
+  const [relationships, setRelationships] =
+    useState<RelationshipListResult | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [configuring, setConfiguring] = useState(!project.bound);
+  const [confirmUnbind, setConfirmUnbind] = useState(false);
+  const [forceUnbind, setForceUnbind] = useState<string | null>(null);
+  const [publishSelection, setPublishSelection] = useState<Selection[]>([]);
+  const [ignoreDialog, setIgnoreDialog] = useState(false);
+  const [association, setAssociation] = useState<AssetRelationshipRow | null>(
+    null,
+  );
+  const [unlink, setUnlink] = useState<AssetRelationshipRow | null>(null);
+  const [batchUnlink, setBatchUnlink] = useState<AssetRelationshipRow[] | null>(
+    null,
+  );
+  const [preview, setPreview] = useState<BatchPublishPreview | null>(null);
+  const [publishResult, setPublishResult] = useState<BatchPublishResult | null>(
+    null,
+  );
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [diffDialog, setDiffDialog] = useState<{
+    title: string;
+    result: AssetDiffResult | null;
+  } | null>(null);
+  const [mergeDialog, setMergeDialog] = useState<{
+    assetId: string;
+    path?: string;
+    provider?: string;
+    preview: MergePreviewResult | null;
+  } | null>(null);
+  const [readDialog, setReadDialog] = useState<{
+    title: string;
+    result: AssetReadResult;
+  } | null>(null);
+
+  const workspaceId = project.workspaceId;
+  const reload = useCallback(() => setRefreshKey((value) => value + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void providersCall({})
+      .then(unwrap)
+      .then((value) => {
+        if (cancelled) return;
+        const list = value as ProviderStatus[];
+        setProviders(list);
+        if (!list.some((entry) => entry.id === provider)) {
+          setProvider(list.find((entry) => entry.skillRoot)?.id ?? "codex");
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, providersCall]);
+
+  useEffect(() => {
+    if (!project.bound) {
+      setStatus(null);
+      setDrift([]);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      statusCall({ projectId: project.projectId }).then(unwrap),
+      workspaceId
+        ? driftCall({
+            projectId: project.projectId,
+            workspaceId,
+            includeIgnored: true,
+          }).then(unwrap)
+        : Promise.resolve([]),
+    ])
+      .then(([nextStatus, nextDrift]) => {
+        if (cancelled) return;
+        const value = nextStatus as { binding: Binding };
+        setStatus(value.binding);
+        setDrift(nextDrift as DriftItem[]);
+        setError(null);
+      })
+      .catch((value) => {
+        if (!cancelled) setError(messageOf(value));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    driftCall,
+    project.bound,
+    project.projectId,
+    refreshKey,
+    statusCall,
+    workspaceId,
+  ]);
+
+  const kind: AssetKind | null =
+    tab === "skills"
+      ? "skill"
+      : tab === "prompt"
+        ? "prompt"
+        : tab === "knowledge"
+          ? "knowledge"
+          : tab === "docs"
+            ? "doc"
+            : null;
+
+  useEffect(() => {
+    if (!workspaceId || !kind || !project.bound) {
+      setRelationships(null);
+      return;
+    }
+    let cancelled = false;
+    const providerForKind =
+      kind === "skill" || kind === "prompt" ? provider : null;
+    void relationshipsCall({
+      projectId: project.projectId,
+      workspaceId,
+      kind,
+      provider: providerForKind,
+    })
+      .then(unwrap)
+      .then((value) => {
+        if (!cancelled) setRelationships(value as RelationshipListResult);
+      })
+      .catch((value) => {
+        if (!cancelled) setError(messageOf(value));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    kind,
+    project.bound,
+    project.projectId,
+    provider,
+    refreshKey,
+    relationshipsCall,
+    workspaceId,
+  ]);
+
+  const run = useCallback(
+    async (label: string, work: () => Promise<void>, keepNotice = false) => {
+      setBusy(label);
+      setError(null);
+      if (!keepNotice) setNotice(null);
+      try {
+        await work();
+        reload();
+        onChanged();
+      } catch (value) {
+        setError(messageOf(value));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [onChanged, reload],
+  );
+
+  const ignoreItem = async (item: DriftItem, ignored: boolean) => {
+    if (!workspaceId) return;
+    setBusy(`ignore:${item.assetId}`);
+    setError(null);
+    try {
+      if (ignored) {
+        unwrap(
+          await driftIgnoreCall({
+            projectId: project.projectId,
+            workspaceId,
+            assetId: item.assetId,
+            path: null,
+            provider: item.provider ?? undefined,
+            reason: ATTENTION_LABELS[item.status],
+          }),
+        );
+      } else {
+        unwrap(
+          await driftUnignoreCall({
+            projectId: project.projectId,
+            workspaceId,
+            assetId: item.assetId,
+            path: null,
+            provider: item.provider ?? undefined,
+          }),
+        );
+      }
+      reload();
+      onChanged();
+    } catch (value) {
+      setError(messageOf(value));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openDiff = async (row: AssetRelationshipRow) => {
+    if (!workspaceId || !row.shared) return;
+    const providerValue =
+      row.shared.kind === "skill" || row.shared.kind === "prompt"
+        ? (row.local?.provider ?? provider)
+        : undefined;
+    setDiffDialog({
+      title: `${row.shared.name} · 共享与本地差异`,
+      result: null,
+    });
+    try {
+      const result = unwrap(
+        await diffCall({
+          projectId: project.projectId,
+          workspaceId,
+          assetId: row.shared.assetId,
+          path: undefined,
+          provider: providerValue,
+        }),
+      ) as AssetDiffResult;
+      setDiffDialog({ title: `${row.shared.name} · 共享与本地差异`, result });
+    } catch (value) {
+      setDiffDialog(null);
+      setError(messageOf(value));
+    }
+  };
+
+  const openMerge = async (row: AssetRelationshipRow) => {
+    if (!workspaceId || !row.shared) return;
+    const providerValue =
+      row.shared.kind === "skill" || row.shared.kind === "prompt"
+        ? (row.local?.provider ?? provider)
+        : undefined;
+    setMergeDialog({
+      assetId: row.shared.assetId,
+      provider: providerValue,
+      preview: null,
+    });
+    try {
+      const result = unwrap(
+        await mergePreviewCall({
+          projectId: project.projectId,
+          workspaceId,
+          assetId: row.shared.assetId,
+          provider: providerValue,
+        }),
+      ) as MergePreviewResult;
+      setMergeDialog({
+        assetId: row.shared.assetId,
+        provider: providerValue,
+        preview: result,
+      });
+    } catch (value) {
+      setMergeDialog(null);
+      setError(messageOf(value));
+    }
+  };
+
+  const openDriftDiff = async (item: DriftItem) => {
+    if (!workspaceId) return;
+    setDiffDialog({ title: `${item.name} · 共享与本地差异`, result: null });
+    try {
+      const result = unwrap(
+        await diffCall({
+          projectId: project.projectId,
+          workspaceId,
+          assetId: item.assetId,
+          path: item.files.find((file) => file.status !== "synced")?.path,
+          provider: item.provider ?? undefined,
+        }),
+      ) as AssetDiffResult;
+      setDiffDialog({ title: `${item.name} · 共享与本地差异`, result });
+    } catch (value) {
+      setDiffDialog(null);
+      setError(messageOf(value));
+    }
+  };
+
+  const openDriftMerge = async (item: DriftItem) => {
+    if (!workspaceId) return;
+    setMergeDialog({
+      assetId: item.assetId,
+      provider: item.provider ?? undefined,
+      preview: null,
+    });
+    try {
+      const result = unwrap(
+        await mergePreviewCall({
+          projectId: project.projectId,
+          workspaceId,
+          assetId: item.assetId,
+          path: item.files.find((file) => file.status !== "synced")?.path,
+          provider: item.provider ?? undefined,
+        }),
+      ) as MergePreviewResult;
+      setMergeDialog({
+        assetId: item.assetId,
+        provider: item.provider ?? undefined,
+        preview: result,
+      });
+    } catch (value) {
+      setMergeDialog(null);
+      setError(messageOf(value));
+    }
+  };
+
+  const resolveDrift = async (item: DriftItem, action: "overwrite" | "keep") =>
+    run(action, async () => {
+      if (!workspaceId) throw new Error("该项目还没有 Workspace");
+      unwrap(
+        await driftResolveCall({
+          projectId: project.projectId,
+          workspaceId,
+          assetId: item.assetId,
+          path: null,
+          provider: item.provider ?? undefined,
+          action,
+        }),
+      );
+      setNotice(
+        action === "overwrite"
+          ? "已用共享版本覆盖本地"
+          : "已保留本地并建立新基线",
+      );
+    });
+
+  const readAssetFile = async (row: AssetRelationshipRow, path?: string) => {
+    if (!row.shared) return;
+    try {
+      const result = unwrap(
+        await assetReadCall({
+          projectId: project.projectId,
+          assetId: row.shared.assetId,
+          path,
+        }),
+      ) as AssetReadResult;
+      setReadDialog({ title: row.shared.name, result });
+    } catch (value) {
+      setError(messageOf(value));
+    }
+  };
+
+  const setEnabled = async (row: AssetRelationshipRow, enabled: boolean) => {
+    if (!workspaceId) return;
+    if (row.shared?.kind === "skill") {
+      const result = unwrap(
+        await skillsSetEnabledCall({
+          projectId: project.projectId,
+          workspaceId,
+          assetId: row.shared.assetId,
+          provider: row.local?.provider ?? provider,
+          enabled,
+        }),
+      ) as {
+        errors: Array<{ provider: string; message: string }>;
+        kept: Array<{ targetPath: string; reason: string }>;
+      };
+      if (result.errors.length > 0) {
+        setError(result.errors.map((entry) => entry.message).join("；"));
+      }
+      setNotice(
+        result.kept.length > 0
+          ? `已保留本地内容：${result.kept.map((entry) => entry.targetPath).join("，")}`
+          : enabled
+            ? "已添加到本地"
+            : "已移除本地关联",
+      );
+    } else if (row.shared?.kind === "prompt") {
+      const result = unwrap(
+        await instructionsSetCall({
+          projectId: project.projectId,
+          workspaceId,
+          provider: row.local?.provider ?? provider,
+          enabled,
+        }),
+      ) as { kept: Array<{ targetPath: string; reason: string }> };
+      setNotice(
+        result.kept.length > 0
+          ? `已保留：${result.kept.map((entry) => entry.targetPath).join("，")}`
+          : enabled
+            ? "已投影到本地"
+            : "已移除投影",
+      );
+    } else {
+      unwrap(
+        await workspacePullCall({ projectId: project.projectId, workspaceId }),
+      );
+      setNotice("已把共享资产添加到本地");
+    }
+  };
+
+  const adopt = async (
+    row: AssetRelationshipRow,
+    mode: "preserve-local" | "use-remote",
+  ) => {
+    if (!workspaceId || !row.shared || !row.local) return;
+    await run("adopt", async () => {
+      unwrap(
+        await relationshipsAdoptCall({
+          projectId: project.projectId,
+          workspaceId,
+          kind: row.shared!.kind,
+          provider: row.local!.provider,
+          assetId: row.shared!.assetId,
+          localAssetId: row.local!.assetId,
+          mode,
+        }),
+      );
+      setAssociation(null);
+      setNotice(
+        mode === "preserve-local"
+          ? `${row.shared!.name} 已关联，保留本地版本`
+          : `${row.shared!.name} 已关联并使用共享版本`,
+      );
+    });
+  };
+
+  const confirmUnlink = async (
+    row: AssetRelationshipRow,
+    deleteLocal: boolean,
+  ) => {
+    if (!workspaceId || !row.shared) return;
+    setBusy("unlink");
+    setError(null);
+    try {
+      const result = unwrap(
+        await relationshipsUnlinkCall({
+          projectId: project.projectId,
+          workspaceId,
+          kind: row.shared.kind,
+          provider: row.local?.provider ?? null,
+          assetId: row.shared.assetId,
+          deleteLocal,
+        }),
+      ) as UnlinkResult;
+      setUnlink(null);
+      setNotice(
+        deleteLocal
+          ? `${row.shared.name} 已解除关联并删除本地资产`
+          : `${row.shared.name} 已解除关联，本地资产已保留${
+              result.hadLocalChanges ? "（包含未发布的本地修改）" : ""
+            }`,
+      );
+      reload();
+      onChanged();
+    } catch (value) {
+      setError(messageOf(value));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmBatchUnlink = async (
+    rows: AssetRelationshipRow[],
+    deleteLocal: boolean,
+  ) => {
+    if (!workspaceId) return;
+    setBusy("batch-unlink");
+    setError(null);
+    try {
+      const assetIds = rows
+        .map((row) => row.shared?.assetId)
+        .filter((value): value is string => Boolean(value));
+      const result = unwrap(
+        await relationshipsBatchUnlinkCall({
+          projectId: project.projectId,
+          workspaceId,
+          kind: rows[0]?.shared?.kind ?? "skill",
+          provider: rows[0]?.local?.provider ?? null,
+          assetIds,
+          deleteLocal,
+        }),
+      ) as {
+        items: UnlinkResult[];
+        failed: Array<{ assetId: string; message: string }>;
+      };
+      setBatchUnlink(null);
+      setNotice(
+        `批量解除关联：成功 ${result.items.length} 项，失败 ${result.failed.length} 项`,
+      );
+      reload();
+      onChanged();
+    } catch (value) {
+      setError(messageOf(value));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const previewPublish = async () => {
+    if (!workspaceId || publishSelection.length === 0) return;
+    setBusy("preview");
+    setError(null);
+    try {
+      const result = unwrap(
+        await batchPreviewCall({
+          projectId: project.projectId,
+          workspaceId,
+          items: publishSelection.map((entry) => ({
+            assetId: entry.assetId,
+            provider: entry.provider,
+          })),
+        }),
+      ) as BatchPublishPreview;
+      setPreview(result);
+      setPreviewOpen(true);
+    } catch (value) {
+      setError(messageOf(value));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const commitPublish = async () => {
+    if (!workspaceId || !preview) return;
+    setBusy("publish");
+    setError(null);
+    try {
+      const result = unwrap(
+        await batchCommitCall({
+          projectId: project.projectId,
+          workspaceId,
+          items: publishSelection.map((entry) => ({
+            assetId: entry.assetId,
+            provider: entry.provider,
+          })),
+          expectedRevision: preview.expectedRevision,
+        }),
+      ) as BatchPublishResult;
+      setPublishResult(result);
+      setPreview(null);
+      setPreviewOpen(false);
+      setNotice(
+        result.commit
+          ? `已发布 ${result.published.length} 项 · ${result.commit.slice(0, 8)}`
+          : "没有写入提交",
+      );
+      setPublishSelection([]);
+      reload();
+      onChanged();
+    } catch (value) {
+      if (isRevisionConflict(value)) {
+        try {
+          unwrap(await syncCall({ projectId: project.projectId }));
+          const refreshed = unwrap(
+            await batchPreviewCall({
+              projectId: project.projectId,
+              workspaceId,
+              items: publishSelection.map((entry) => ({
+                assetId: entry.assetId,
+                provider: entry.provider,
+              })),
+            }),
+          ) as BatchPublishPreview;
+          setPreview(refreshed);
+          setPreviewOpen(true);
+          setNotice(
+            "共享仓库已有新提交，发布预览已按最新版本重新生成，请检查后再次确认发布",
+          );
+          setError(null);
+        } catch (refreshError) {
+          setPreview(null);
+          setPreviewOpen(false);
+          setError(messageOf(refreshError));
+        }
+      } else {
+        setError(messageOf(value));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const skillProviders = providers.filter((entry) => entry.skillRoot);
+  const promptProviders = providers.filter(
+    (entry) => entry.instructionEntrypoint,
+  );
+  const activeProviders = kind === "prompt" ? promptProviders : skillProviders;
+
+  return (
+    <View
+      style={{ flex: 1, backgroundColor: tokens.colors.surfaceWorkspace }}
+      testID="shared-assets-detail"
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          paddingHorizontal: compact ? 12 : 28,
+          paddingVertical: compact ? 8 : 10,
+          borderBottomWidth: 1,
+          borderBottomColor: tokens.colors.border,
+          flexWrap: "wrap",
+        }}
+      >
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="ghost"
+          onPress={onBack}
+          testID="shared-assets-back"
+        >
+          ← 返回项目列表
+        </Button>
+        <Text
+          style={{
+            color: tokens.colors.foregroundMuted,
+            fontSize: tokens.fontSize.sm,
+            flexShrink: 1,
+          }}
+          numberOfLines={compact ? 1 : undefined}
+          ellipsizeMode="middle"
+        >
+          {project.rootPath}
+          {project.workspaceName
+            ? ` · 作用域工作区：${project.workspaceName}`
+            : " · 该项目暂无工作区"}
+        </Text>
+        <View style={{ flex: 1 }} />
+        {workspaceId ? (
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="ghost"
+            onPress={() => setIgnoreDialog(true)}
+            testID="shared-assets-ignore-rules-open"
+          >
+            忽略规则
+          </Button>
+        ) : null}
+      </View>
+
+      <ScrollView
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{
+          padding: compact ? 16 : 28,
+          paddingBottom: 48,
+          gap: 16,
+        }}
+      >
+        {error ? (
+          <Alert
+            tone="danger"
+            title="共享资产操作失败"
+            description={error}
+            tokens={tokens}
+          />
+        ) : null}
+        {notice ? (
+          <Alert tone="success" title={notice} tokens={tokens} />
+        ) : null}
+
+        <Panel tokens={tokens}>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: tokens.radius.lg,
+                backgroundColor: `${tokens.colors.accent}18`,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Icon name="LibraryBig" size={20} color={tokens.colors.accent} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text
+                style={{
+                  color: tokens.colors.foreground,
+                  fontSize: tokens.fontSize.lg,
+                  fontWeight: "600",
+                }}
+              >
+                共享资产库
+              </Text>
+              {compact ? null : (
+                <Muted tokens={tokens}>
+                  使用团队共享 Skill、Provider SYSTEM Prompt
+                  与经验库，也可选择本地资产发布给团队
+                </Muted>
+              )}
+            </View>
+          </View>
+        </Panel>
+
+        {configuring || !project.bound ? (
+          <ConfigureForm
+            tokens={tokens}
+            project={project}
+            initialRepoUrl={project.repoUrl ?? ""}
+            initialBranch={project.branch ?? "main"}
+            busy={busy === "configure"}
+            onCancel={project.bound ? () => setConfiguring(false) : undefined}
+            onSubmit={(repoUrl, branch, syncMode) =>
+              run("configure", async () => {
+                unwrap(
+                  await configureCall({
+                    projectId: project.projectId,
+                    repoUrl,
+                    branch: branch.trim() ? branch.trim() : null,
+                    syncMode,
+                    trustConfirmed: true,
+                  }),
+                );
+                setConfiguring(false);
+                setNotice(
+                  project.bound ? "共享仓库已切换" : "团队共享库已连接",
+                );
+              })
+            }
+          />
+        ) : (
+          <OverviewCard
+            tokens={tokens}
+            compact={compact}
+            project={project}
+            binding={status}
+            busy={busy}
+            confirmUnbind={confirmUnbind}
+            forceUnbind={forceUnbind}
+            onSync={() =>
+              run("sync", async () => {
+                const result = unwrap(
+                  await syncCall({ projectId: project.projectId }),
+                ) as { changed: boolean };
+                setNotice(
+                  result.changed
+                    ? "已同步到远端最新提交"
+                    : "已是最新，无需更新",
+                );
+              })
+            }
+            onRefresh={() => {
+              reload();
+              onChanged();
+              setNotice("已刷新");
+            }}
+            onRebind={() => setConfiguring(true)}
+            onRequestUnbind={() => setConfirmUnbind(true)}
+            onCancelUnbind={() => setConfirmUnbind(false)}
+            onUnbind={(force) =>
+              run("unbind", async () => {
+                try {
+                  unwrap(
+                    await unbindCall({
+                      projectId: project.projectId,
+                      force,
+                    }),
+                  );
+                  setConfirmUnbind(false);
+                  setForceUnbind(null);
+                  setNotice("已解绑共享仓库，本地资产均已保留");
+                } catch (value) {
+                  if (messageOf(value).includes("E_LOCAL_CHANGES")) {
+                    setForceUnbind(messageOf(value));
+                    setConfirmUnbind(false);
+                    return;
+                  }
+                  throw value;
+                }
+              })
+            }
+          />
+        )}
+
+        {project.bound ? (
+          <>
+            {!workspaceId ? (
+              <Alert
+                tone="warning"
+                title="该项目还没有 Workspace"
+                description="绑定可用，但投影、同步与发布需要至少一个 Workspace。请先在侧边栏创建一个工作区。"
+                tokens={tokens}
+              />
+            ) : null}
+            <TabRail>
+              {TABS.map((entry) => (
+                <TabButton
+                  key={entry.id}
+                  active={tab === entry.id}
+                  label={entry.label}
+                  count={
+                    entry.id === "drift"
+                      ? drift.filter(
+                          (item) => item.status !== "synced" && !item.ignored,
+                        ).length
+                      : 0
+                  }
+                  onPress={() => setTab(entry.id)}
+                  tokens={tokens}
+                  testID={`shared-assets-tab-${entry.id}`}
+                />
+              ))}
+            </TabRail>
+
+            {kind && activeProviders.length > 0 ? (
+              <TabRail>
+                {activeProviders.map((entry) => (
+                  <TabButton
+                    key={entry.id}
+                    active={provider === entry.id}
+                    label={entry.label}
+                    onPress={() => setProvider(entry.id)}
+                    tokens={tokens}
+                    testID={`shared-assets-provider-${entry.id}`}
+                  />
+                ))}
+              </TabRail>
+            ) : null}
+
+            {tab === "skills" ||
+            tab === "prompt" ||
+            tab === "knowledge" ||
+            tab === "docs" ? (
+              <RelationshipView
+                tokens={tokens}
+                compact={compact}
+                kind={kind!}
+                result={relationships}
+                busy={busy}
+                workspaceId={workspaceId}
+                selected={publishSelection}
+                onToggleSelected={(row) => {
+                  if (!row.local) return;
+                  const value = {
+                    assetId: row.shared?.assetId ?? row.local.assetId,
+                    provider: row.local.provider ?? undefined,
+                  };
+                  setPublishSelection((current) => {
+                    const exists = current.some(
+                      (entry) => entry.assetId === value.assetId,
+                    );
+                    return exists
+                      ? current.filter(
+                          (entry) => entry.assetId !== value.assetId,
+                        )
+                      : [...current, value];
+                  });
+                }}
+                onEnable={(row) =>
+                  void run("enable", () => setEnabled(row, true))
+                }
+                onAssociate={(row) => setAssociation(row)}
+                onUnlink={(row) => setUnlink(row)}
+                onBatchUnlink={(rows) => setBatchUnlink(rows)}
+                onPublish={(rows) => {
+                  setPublishSelection(
+                    rows
+                      .filter((row) => row.shared && row.local)
+                      .map((row) => ({
+                        assetId: row.shared!.assetId,
+                        provider: row.local?.provider ?? undefined,
+                      })),
+                  );
+                  setTab("changes");
+                }}
+                onDiff={(row) => void openDiff(row)}
+                onMerge={(row) => void openMerge(row)}
+                onDiscard={(row) =>
+                  run("discard", async () => {
+                    if (!workspaceId || !row.shared) return;
+                    unwrap(
+                      await driftResolveCall({
+                        projectId: project.projectId,
+                        workspaceId,
+                        assetId: row.shared.assetId,
+                        path: null,
+                        provider: row.local?.provider ?? undefined,
+                        action: "overwrite",
+                      }),
+                    );
+                    setNotice(`${row.shared.name} 已恢复为共享仓库的版本`);
+                  })
+                }
+                onIgnore={(row, ignored) =>
+                  run("ignore-row", async () => {
+                    if (!workspaceId) return;
+                    const assetId =
+                      row.shared?.assetId ??
+                      (row.local ? assetIdForLocal(row.local) : null);
+                    if (!assetId) return;
+                    if (ignored) {
+                      unwrap(
+                        await driftIgnoreCall({
+                          projectId: project.projectId,
+                          workspaceId,
+                          assetId,
+                          path: null,
+                          provider: row.local?.provider ?? undefined,
+                          reason: "未同步远端",
+                        }),
+                      );
+                    } else {
+                      unwrap(
+                        await driftUnignoreCall({
+                          projectId: project.projectId,
+                          workspaceId,
+                          assetId,
+                          path: null,
+                          provider: row.local?.provider ?? undefined,
+                        }),
+                      );
+                    }
+                  })
+                }
+                onRead={(row, path) => void readAssetFile(row, path)}
+              />
+            ) : null}
+
+            {tab === "changes" ? (
+              <ChangesView
+                tokens={tokens}
+                drift={drift}
+                selection={publishSelection}
+                onSelectionChange={setPublishSelection}
+                preview={preview}
+                result={publishResult}
+                busy={busy}
+                onPreview={() => void previewPublish()}
+                onCommit={() => void commitPublish()}
+                onOpenPreview={() => setPreviewOpen(true)}
+                onClear={() => {
+                  setPublishSelection([]);
+                  setPreview(null);
+                  setPublishResult(null);
+                }}
+              />
+            ) : null}
+
+            {tab === "drift" ? (
+              <DriftView
+                tokens={tokens}
+                items={drift.filter(
+                  (item) => item.status !== "synced" || item.ignored,
+                )}
+                busy={busy}
+                onDiff={(item) => void openDriftDiff(item)}
+                onMerge={(item) => void openDriftMerge(item)}
+                onOverwrite={(item) => void resolveDrift(item, "overwrite")}
+                onKeep={(item) => void resolveDrift(item, "keep")}
+                onIgnore={(item, ignored) => void ignoreItem(item, ignored)}
+                onPull={() =>
+                  run("pull", async () => {
+                    if (!workspaceId) return;
+                    unwrap(
+                      await workspacePullCall({
+                        projectId: project.projectId,
+                        workspaceId,
+                      }),
+                    );
+                    setNotice("已从共享仓库刷新本地副本");
+                  })
+                }
+              />
+            ) : null}
+
+            {tab === "settings" ? (
+              <SettingsView
+                tokens={tokens}
+                projectId={project.projectId}
+                workspaceId={workspaceId}
+                providers={providers}
+                drift={drift}
+                busy={busy}
+                onIgnoreChange={(item, ignored) =>
+                  void ignoreItem(item, ignored)
+                }
+                onNotice={setNotice}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </ScrollView>
+
+      <AssociationDialog
+        row={association}
+        tokens={tokens}
+        busy={busy === "adopt"}
+        onClose={() => setAssociation(null)}
+        onAdopt={(mode) => {
+          if (association) void adopt(association, mode);
+        }}
+      />
+      <UnlinkDialog
+        rows={unlink ? [unlink] : []}
+        tokens={tokens}
+        busy={busy === "unlink"}
+        onClose={() => setUnlink(null)}
+        onConfirm={(deleteLocal) => {
+          if (unlink) void confirmUnlink(unlink, deleteLocal);
+        }}
+      />
+      <BatchUnlinkDialog
+        rows={batchUnlink ?? []}
+        tokens={tokens}
+        busy={busy === "batch-unlink"}
+        onClose={() => setBatchUnlink(null)}
+        onConfirm={(deleteLocal) => {
+          if (batchUnlink) void confirmBatchUnlink(batchUnlink, deleteLocal);
+        }}
+      />
+      <PublishPreviewDialog
+        open={previewOpen}
+        preview={preview}
+        tokens={tokens}
+        busy={busy === "publish"}
+        onClose={() => setPreviewOpen(false)}
+        onCommit={() => void commitPublish()}
+      />
+      <DiffDialog
+        dialog={diffDialog}
+        tokens={tokens}
+        onClose={() => setDiffDialog(null)}
+      />
+      <MergeDialog
+        dialog={mergeDialog}
+        tokens={tokens}
+        busy={busy === "merge"}
+        onClose={() => setMergeDialog(null)}
+        onApply={(resolutions) =>
+          run("merge", async () => {
+            if (!mergeDialog?.preview || !workspaceId) return;
+            unwrap(
+              await mergeApplyCall({
+                projectId: project.projectId,
+                workspaceId,
+                assetId: mergeDialog.assetId,
+                provider: mergeDialog.provider,
+                resolutions,
+                expectedLocalDigest: mergeDialog.preview.expectedLocalDigest,
+                expectedRemoteDigest: mergeDialog.preview.expectedRemoteDigest,
+              }),
+            );
+            setMergeDialog(null);
+            setNotice("已合并到本地，请确认后再发布");
+          })
+        }
+      />
+      <ReadDialog
+        dialog={readDialog}
+        tokens={tokens}
+        onClose={() => setReadDialog(null)}
+      />
+      <IgnoreRulesDialog
+        open={ignoreDialog}
+        tokens={tokens}
+        projectId={project.projectId}
+        drift={drift}
+        busy={busy === "ignore-rules"}
+        onClose={() => setIgnoreDialog(false)}
+        onRestore={(item) => void ignoreItem(item, false)}
+      />
+    </View>
+  );
+}
+
+function ConfigureForm({
+  tokens,
+  project,
+  initialRepoUrl,
+  initialBranch,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  tokens: Tokens;
+  project: ProjectSummary;
+  initialRepoUrl: string;
+  initialBranch: string;
+  busy: boolean;
+  onCancel?: () => void;
+  onSubmit: (
+    repoUrl: string,
+    branch: string,
+    syncMode: "auto" | "manual",
+  ) => void;
+}) {
+  const [repoUrl, setRepoUrl] = useState(initialRepoUrl);
+  const [branch, setBranch] = useState(initialBranch);
+  const [syncMode, setSyncMode] = useState<"auto" | "manual">(
+    project.syncMode ?? "manual",
+  );
+  return (
+    <Panel
+      tokens={tokens}
+      style={{
+        width: "100%",
+        maxWidth: 720,
+        alignSelf: "center",
+        marginTop: project.bound ? 0 : 56,
+      }}
+    >
+      <SectionTitle tokens={tokens}>
+        {project.bound ? "切换共享 Git 仓库" : "连接团队 Git 仓库"}
+      </SectionTitle>
+      <Muted tokens={tokens}>
+        {project.bound
+          ? "新仓库验证成功后才会完成切换；原仓库关联会解除，本地资产不会被删除。"
+          : "当前项目只绑定一个仓库。项目身份自动管理，无需再填写项目名称。"}
+      </Muted>
+      <Field
+        label="Git 仓库地址"
+        hint="仓库名称会根据地址自动识别；不同项目可绑定不同仓库。"
+        tokens={tokens}
+      >
+        <TextField
+          value={repoUrl}
+          onChangeText={setRepoUrl}
+          placeholder="https://github.com/team/assets.git"
+          tokens={tokens}
+          editable={!busy}
+          testID="shared-assets-repo-url"
+        />
+      </Field>
+      <Field
+        label="分支"
+        hint="daemon 会自动更新共享仓库；是否同步或合并到项目本地由你逐项决定。"
+        tokens={tokens}
+      >
+        <TextField
+          value={branch}
+          onChangeText={setBranch}
+          placeholder="main"
+          tokens={tokens}
+          editable={!busy}
+          testID="shared-assets-branch"
+        />
+      </Field>
+      {project.bound ? (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant={syncMode === "manual" ? "default" : "secondary"}
+            onPress={() => setSyncMode("manual")}
+          >
+            手动同步
+          </Button>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant={syncMode === "auto" ? "default" : "secondary"}
+            onPress={() => setSyncMode("auto")}
+          >
+            自动同步
+          </Button>
         </View>
       ) : null}
-    </ScrollView>
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "flex-end",
+          gap: 8,
+        }}
+      >
+        {onCancel ? (
+          <Button
+            tokens={tokens}
+            variant="ghost"
+            disabled={busy}
+            onPress={onCancel}
+          >
+            取消
+          </Button>
+        ) : null}
+        <Button
+          tokens={tokens}
+          variant="default"
+          disabled={busy || !repoUrl.trim()}
+          onPress={() => onSubmit(repoUrl, branch, syncMode)}
+          testID="shared-assets-configure-submit"
+        >
+          {busy ? "验证中…" : project.bound ? "验证并切换" : "连接共享库"}
+        </Button>
+      </View>
+    </Panel>
+  );
+}
+
+function OverviewCard({
+  tokens,
+  compact,
+  project,
+  binding,
+  busy,
+  confirmUnbind,
+  forceUnbind,
+  onSync,
+  onRefresh,
+  onRebind,
+  onRequestUnbind,
+  onCancelUnbind,
+  onUnbind,
+}: {
+  tokens: Tokens;
+  compact: boolean;
+  project: ProjectSummary;
+  binding: Binding | null;
+  busy: string | null;
+  confirmUnbind: boolean;
+  forceUnbind: string | null;
+  onSync: () => void;
+  onRefresh: () => void;
+  onRebind: () => void;
+  onRequestUnbind: () => void;
+  onCancelUnbind: () => void;
+  onUnbind: (force: boolean) => void;
+}) {
+  const state = binding?.state ?? project.state;
+  return (
+    <Panel tokens={tokens}>
+      <View
+        style={{
+          flexDirection: compact ? "column" : "row",
+          alignItems: compact ? "stretch" : "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text
+            style={{
+              color: tokens.colors.foreground,
+              fontSize: tokens.fontSize["2xl"],
+              fontWeight: "600",
+            }}
+          >
+            {binding?.displayName ?? repositoryDisplayName(project.repoUrl)}
+          </Text>
+          <Mono tokens={tokens} numberOfLines={1}>
+            {project.repoUrl ?? ""}
+          </Mono>
+        </View>
+        <View
+          style={{
+            flexDirection: "row",
+            gap: 6,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <Badge
+            tokens={tokens}
+            label={project.syncMode === "auto" ? "自动同步" : "手动同步"}
+          />
+          {state?.dirty ? (
+            <Badge tokens={tokens} label="本地改动" tone="warn" />
+          ) : null}
+          {(state?.behind ?? 0) > 0 ? (
+            <Badge
+              tokens={tokens}
+              label={`落后 ${state?.behind}`}
+              tone="warn"
+            />
+          ) : null}
+          {(state?.ahead ?? 0) > 0 ? (
+            <Badge tokens={tokens} label={`领先 ${state?.ahead}`} />
+          ) : null}
+        </View>
+      </View>
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: "wrap",
+          gap: compact ? 8 : 20,
+        }}
+      >
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          <Muted tokens={tokens}>分支</Muted>
+          <Text
+            style={{
+              color: tokens.colors.foreground,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            {project.branch ?? "(默认分支)"}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          <Muted tokens={tokens}>本地</Muted>
+          <Mono tokens={tokens} testID="shared-assets-local-revision">
+            {shortRevision(state?.localRevision)}
+          </Mono>
+        </View>
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          <Muted tokens={tokens}>远端</Muted>
+          <Mono tokens={tokens}>{shortRevision(state?.remoteRevision)}</Mono>
+        </View>
+        <Muted tokens={tokens}>
+          最近同步{" "}
+          {state?.lastSyncedAt
+            ? new Date(state.lastSyncedAt).toLocaleString()
+            : "—"}
+        </Muted>
+      </View>
+      {state?.lastError ? (
+        <Alert
+          tone="danger"
+          title={state.lastError.code}
+          description={state.lastError.message}
+          tokens={tokens}
+        />
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="default"
+          icon="RefreshCw"
+          disabled={busy !== null}
+          onPress={onSync}
+          testID="shared-assets-sync"
+        >
+          {busy === "sync" ? "同步中…" : "检查更新并同步"}
+        </Button>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="ghost"
+          disabled={busy !== null}
+          onPress={onRebind}
+        >
+          重新绑定
+        </Button>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="danger"
+          disabled={busy !== null}
+          onPress={onRequestUnbind}
+        >
+          解绑
+        </Button>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="ghost"
+          disabled={busy !== null}
+          onPress={onRefresh}
+        >
+          刷新
+        </Button>
+      </View>
+      {confirmUnbind ? (
+        <ConfirmInline
+          tokens={tokens}
+          title="解绑共享仓库？"
+          description="受管投影会被移除，本地修改会保留；项目文件不会被删除。"
+          confirmLabel="确认解绑"
+          cancelLabel="取消"
+          onConfirm={() => onUnbind(false)}
+          onCancel={onCancelUnbind}
+          destructive
+        />
+      ) : null}
+      {forceUnbind ? (
+        <ConfirmInline
+          tokens={tokens}
+          title="共享 checkout 有未推送提交或本地改动"
+          description={`${forceUnbind}。仍要解绑将丢弃这些提交，但不会删除项目内资产。`}
+          confirmLabel="仍要解绑"
+          cancelLabel="取消"
+          onConfirm={() => onUnbind(true)}
+          onCancel={() => onCancelUnbind()}
+          destructive
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+function RelationshipView({
+  tokens,
+  compact,
+  kind,
+  result,
+  busy,
+  workspaceId,
+  selected,
+  onToggleSelected,
+  onEnable,
+  onAssociate,
+  onUnlink,
+  onBatchUnlink,
+  onPublish,
+  onDiff,
+  onMerge,
+  onDiscard,
+  onIgnore,
+  onRead,
+}: {
+  tokens: Tokens;
+  compact: boolean;
+  kind: AssetKind;
+  result: RelationshipListResult | null;
+  busy: string | null;
+  workspaceId: string | null;
+  selected: Selection[];
+  onToggleSelected: (row: AssetRelationshipRow) => void;
+  onEnable: (row: AssetRelationshipRow) => void;
+  onAssociate: (row: AssetRelationshipRow) => void;
+  onUnlink: (row: AssetRelationshipRow) => void;
+  onBatchUnlink: (rows: AssetRelationshipRow[]) => void;
+  onPublish: (rows: AssetRelationshipRow[]) => void;
+  onDiff: (row: AssetRelationshipRow) => void;
+  onMerge: (row: AssetRelationshipRow) => void;
+  onDiscard: (row: AssetRelationshipRow) => void;
+  onIgnore: (row: AssetRelationshipRow, ignored: boolean) => void;
+  onRead: (row: AssetRelationshipRow, path?: string) => void;
+}) {
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
+  const rows = result?.rows ?? [];
+  const batchRows = rows.filter((row) => batchSelected.has(row.id));
+  const candidates = rows.filter((row) => row.relationship === "candidate");
+  const remoteUpdates = rows.filter(
+    (row) =>
+      row.relationship === "linked" && row.syncStatus === "remote-update",
+  );
+  const linked = rows.filter((row) => row.relationship === "linked");
+  const toggleBatch = (id: string) =>
+    setBatchSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  if (!workspaceId) {
+    return <Empty tokens={tokens}>该项目还没有 Workspace。</Empty>;
+  }
+  if (!result) return <Spinner tokens={tokens} />;
+
+  return (
+    <View style={{ gap: 12 }}>
+      <View
+        style={{
+          flexDirection: compact ? "column" : "row",
+          alignItems: compact ? "stretch" : "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <View style={{ gap: 2 }}>
+          <Text
+            style={{
+              color: tokens.colors.foreground,
+              fontSize: tokens.fontSize.lg,
+              fontWeight: "600",
+            }}
+          >
+            {KIND_LABELS[kind]} · {rows.length} 项
+          </Text>
+          <Muted tokens={tokens}>
+            {kind === "skill"
+              ? "启用后投影到对应 Provider 的项目级 Skill 目录；停用只删除未被修改的受管副本。"
+              : kind === "prompt"
+                ? "链路：共享 AGENTS.md → 项目 .agentstorm/AGENTS.md → Provider 原生入口。"
+                : "共享与本地副本的关联；关联后可在「变更 / 发布」中选择发布。"}
+          </Muted>
+        </View>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant={batchMode ? "default" : "secondary"}
+          style={compact ? { alignSelf: "flex-start" } : undefined}
+          onPress={() => {
+            setBatchMode((value) => !value);
+            setBatchSelected(new Set());
+          }}
+          testID="shared-assets-batch-toggle"
+        >
+          {batchMode ? "退出批量" : "批量操作"}
+        </Button>
+      </View>
+
+      {batchMode && candidates.length > 0 ? (
+        <Panel tokens={tokens}>
+          <SectionTitle tokens={tokens}>
+            {candidates.length} 项同名资产尚未关联
+          </SectionTitle>
+          <Muted tokens={tokens}>
+            一键关联按「保留本地」处理：不改动本地文件，不自动发布；与共享版本不同时显示为本地未发布。
+          </Muted>
+          <View>
+            <Button
+              tokens={tokens}
+              size="xs"
+              icon="Link2"
+              style={{ alignSelf: "flex-start" }}
+              onPress={() => candidates.forEach((row) => onAssociate(row))}
+            >
+              一键关联全部
+            </Button>
+          </View>
+        </Panel>
+      ) : null}
+
+      {rows.length === 0 ? (
+        <Empty tokens={tokens}>
+          共享仓库和本地都没有发现 {KIND_LABELS[kind]}
+        </Empty>
+      ) : null}
+
+      {rows.map((row) => {
+        const isSelected = selected.some(
+          (entry) =>
+            entry.assetId === (row.shared?.assetId ?? row.local?.assetId),
+        );
+        const publishedLocal =
+          row.local &&
+          row.shared &&
+          (row.relationship === "linked" || row.relationship === "candidate");
+        return (
+          <View
+            key={row.id}
+            style={{
+              flexDirection: "row",
+              alignItems: "stretch",
+              gap: 8,
+            }}
+            testID={`shared-assets-row-${row.shared?.name ?? row.local?.name}`}
+          >
+            {batchMode ? (
+              <View style={{ justifyContent: "center" }}>
+                <Checkbox
+                  tokens={tokens}
+                  checked={batchSelected.has(row.id)}
+                  onPress={() => toggleBatch(row.id)}
+                  accessibilityLabel={`选择 ${row.shared?.name ?? row.local?.name}`}
+                  testID={`shared-batch-select-${row.id}`}
+                />
+              </View>
+            ) : null}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <RelationshipRow
+                row={row}
+                tokens={tokens}
+                compact={compact}
+                selected={isSelected && Boolean(publishedLocal)}
+                showSelection={Boolean(publishedLocal)}
+                busy={busy}
+                onToggleSelected={() => onToggleSelected(row)}
+                onEnable={() => onEnable(row)}
+                onAssociate={() => onAssociate(row)}
+                onUnlink={() => onUnlink(row)}
+                onPublish={() => onPublish([row])}
+                onDiff={() => onDiff(row)}
+                onMerge={() => onMerge(row)}
+                onDiscard={() => onDiscard(row)}
+                onIgnore={(ignored) => onIgnore(row, ignored)}
+                onRead={(path) => onRead(row, path)}
+              />
+            </View>
+          </View>
+        );
+      })}
+
+      {batchMode ? (
+        <View
+          style={{
+            flexDirection: "row",
+            gap: 8,
+            flexWrap: "wrap",
+            borderTopWidth: 1,
+            borderTopColor: tokens.colors.border,
+            paddingTop: 12,
+            alignItems: "center",
+          }}
+        >
+          <Muted tokens={tokens}>已选择 {batchRows.length} 项</Muted>
+          {batchRows.length > 0 ? (
+            <>
+              {batchRows.some((row) => row.relationship === "candidate") ? (
+                <Button
+                  tokens={tokens}
+                  size="xs"
+                  onPress={() =>
+                    batchRows
+                      .filter((row) => row.relationship === "candidate")
+                      .forEach((row) => onAssociate(row))
+                  }
+                >
+                  关联已有本地
+                </Button>
+              ) : null}
+              {batchRows.some(
+                (row) =>
+                  row.relationship === "linked" &&
+                  row.syncStatus === "remote-update",
+              ) ? (
+                <Button
+                  tokens={tokens}
+                  size="xs"
+                  onPress={() =>
+                    batchRows
+                      .filter(
+                        (row) =>
+                          row.relationship === "linked" &&
+                          row.syncStatus === "remote-update",
+                      )
+                      .forEach((row) => onEnable(row))
+                  }
+                >
+                  批量同步到本地
+                </Button>
+              ) : null}
+              {batchRows.some((row) => row.local && row.shared) ? (
+                <Button
+                  tokens={tokens}
+                  size="xs"
+                  variant="default"
+                  onPress={() =>
+                    onPublish(
+                      batchRows.filter((row) => row.shared && row.local),
+                    )
+                  }
+                >
+                  批量发布
+                </Button>
+              ) : null}
+              {batchRows.some((row) => row.relationship === "linked") ? (
+                <Button
+                  tokens={tokens}
+                  size="xs"
+                  variant="danger"
+                  onPress={() =>
+                    onBatchUnlink(
+                      batchRows.filter((row) => row.relationship === "linked"),
+                    )
+                  }
+                >
+                  批量解除关联
+                </Button>
+              ) : null}
+            </>
+          ) : null}
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="ghost"
+            onPress={() => {
+              setBatchSelected(new Set(rows.map((row) => row.id)));
+            }}
+          >
+            全选
+          </Button>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="ghost"
+            onPress={() => setBatchSelected(new Set())}
+          >
+            清空
+          </Button>
+        </View>
+      ) : null}
+
+      {remoteUpdates.length > 0 && !batchMode ? (
+        <Muted tokens={tokens}>
+          有 {remoteUpdates.length}{" "}
+          项共享更新可同步到本地；在对应行点击「同步到本地」。
+        </Muted>
+      ) : null}
+      {linked.length === 0 && !batchMode ? (
+        <Muted tokens={tokens}>当前没有已关联的 {KIND_LABELS[kind]}。</Muted>
+      ) : null}
+    </View>
+  );
+}
+
+function RelationshipRow({
+  row,
+  tokens,
+  compact,
+  selected,
+  showSelection,
+  busy,
+  onToggleSelected,
+  onEnable,
+  onAssociate,
+  onUnlink,
+  onPublish,
+  onDiff,
+  onMerge,
+  onDiscard,
+  onIgnore,
+  onRead,
+}: {
+  row: AssetRelationshipRow;
+  tokens: Tokens;
+  compact: boolean;
+  selected: boolean;
+  showSelection: boolean;
+  busy: string | null;
+  onToggleSelected: () => void;
+  onEnable: () => void;
+  onAssociate: () => void;
+  onUnlink: () => void;
+  onPublish: () => void;
+  onDiff: () => void;
+  onMerge: () => void;
+  onDiscard: () => void;
+  onIgnore: (ignored: boolean) => void;
+  onRead: (path?: string) => void;
+}) {
+  const shared = row.shared;
+  const local = row.local;
+  const syncStatus = row.syncStatus;
+  const isRemoteUpdate =
+    row.relationship === "linked" && syncStatus === "remote-update";
+  const isDiverged = row.relationship === "linked" && syncStatus === "diverged";
+  const isLocalUpdate =
+    row.relationship === "linked" && syncStatus === "local-update";
+  const isRemoteDeleted =
+    row.relationship === "linked" && syncStatus === "remote-deleted";
+  const isPrivate = row.relationship === "private";
+  const isCandidate = row.relationship === "candidate";
+  const isSharedOnly = row.relationship === "shared-only";
+  const isSynced =
+    row.relationship === "linked" &&
+    !isRemoteUpdate &&
+    !isDiverged &&
+    !isLocalUpdate &&
+    !isRemoteDeleted;
+
+  const sharedCard = shared ? (
+    <View
+      style={[
+        {
+          flex: compact ? undefined : 1,
+          minWidth: 0,
+          borderWidth: 1,
+          borderColor:
+            row.relationship === "linked"
+              ? tokens.colors.accent
+              : tokens.colors.border,
+          backgroundColor: tokens.colors.surface1,
+          borderRadius: tokens.radius.lg,
+          padding: tokens.spacing[3],
+          gap: 4,
+        },
+        isDiverged ? { borderColor: tokens.colors.danger } : null,
+        isRemoteDeleted ? { borderColor: tokens.colors.danger } : null,
+        isRemoteUpdate ? { borderColor: tokens.colors.warning } : null,
+        isLocalUpdate ? { borderColor: tokens.colors.warning } : null,
+      ]}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Icon
+          name={
+            isRemoteDeleted
+              ? "X"
+              : isRemoteUpdate
+                ? "RefreshCw"
+                : isLocalUpdate
+                  ? "UploadCloud"
+                  : row.relationship === "linked"
+                    ? "Check"
+                    : "LibraryBig"
+          }
+          size={14}
+          color={
+            isRemoteDeleted || isDiverged
+              ? tokens.colors.danger
+              : isRemoteUpdate || isLocalUpdate
+                ? tokens.colors.warning
+                : tokens.colors.accent
+          }
+        />
+        <Text
+          style={{
+            color: tokens.colors.foreground,
+            fontSize: tokens.fontSize.base,
+            fontWeight: "600",
+            flexShrink: 1,
+          }}
+          numberOfLines={1}
+        >
+          {shared.name}
+        </Text>
+        <Badge tokens={tokens} label="项目级" />
+      </View>
+      <Muted tokens={tokens} numberOfLines={2}>
+        {shared.description || "无描述"}
+      </Muted>
+      {syncStatus && syncStatus !== "synced" ? (
+        <Badge
+          tokens={tokens}
+          label={ATTENTION_LABELS[syncStatus]}
+          tone={DRIFT_TONES[syncStatus]}
+        />
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+        {shared.files[0] ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => onRead(shared.files[0]?.path)}
+          >
+            <Text
+              style={{
+                color: tokens.colors.accent,
+                fontSize: tokens.fontSize.xs,
+              }}
+            >
+              预览
+            </Text>
+          </Pressable>
+        ) : null}
+        <Muted tokens={tokens}>{shared.fileCount} 个文件</Muted>
+      </View>
+    </View>
+  ) : (
+    <View
+      style={{
+        flex: compact ? undefined : 1,
+        borderWidth: 1,
+        borderStyle: "dashed",
+        borderColor: tokens.colors.border,
+        borderRadius: tokens.radius.lg,
+        minHeight: 96,
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 8,
+      }}
+    >
+      <Muted tokens={tokens}>
+        {isPrivate ? "共享仓库中不存在" : "尚未添加到本地"}
+      </Muted>
+    </View>
+  );
+
+  const localCard = local ? (
+    <View
+      style={{
+        flex: compact ? undefined : 1,
+        minWidth: 0,
+        borderWidth: 1,
+        borderColor: isRemoteUpdate
+          ? tokens.colors.warning
+          : tokens.colors.border,
+        backgroundColor: tokens.colors.surface0,
+        borderRadius: tokens.radius.lg,
+        padding: tokens.spacing[3],
+        gap: 4,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {showSelection ? (
+          <Checkbox
+            tokens={tokens}
+            checked={selected}
+            onPress={onToggleSelected}
+            accessibilityLabel={`选择发布 ${local.name}`}
+            testID={`shared-assets-publish-select-${local.name}`}
+          />
+        ) : null}
+        <Text
+          style={{
+            color: tokens.colors.foreground,
+            fontSize: tokens.fontSize.base,
+            fontWeight: "600",
+            flexShrink: 1,
+          }}
+          numberOfLines={1}
+        >
+          {local.name}
+        </Text>
+        <Badge tokens={tokens} label={local.provider ?? "项目级"} />
+      </View>
+      <Mono tokens={tokens} numberOfLines={1}>
+        {local.path}
+      </Mono>
+      <Muted tokens={tokens} numberOfLines={1}>
+        {local.fileCount} 个文件
+        {local.description ? ` · ${local.description}` : ""}
+      </Muted>
+      {row.relationship === "private" ? (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.xs,
+            }}
+          >
+            未同步远端
+          </Text>
+          {row.syncStatus === "unpublished-local" ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onIgnore(true)}
+            >
+              <Text
+                style={{
+                  color: tokens.colors.accent,
+                  fontSize: tokens.fontSize.xs,
+                }}
+              >
+                忽略提醒
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      {row.relationship === "linked" && row.driftFiles > 0 ? (
+        <Muted tokens={tokens}>{row.driftFiles} 个文件有差异</Muted>
+      ) : null}
+    </View>
+  ) : (
+    <View
+      style={{
+        flex: compact ? undefined : 1,
+        borderWidth: 1,
+        borderStyle: "dashed",
+        borderColor: tokens.colors.border,
+        borderRadius: tokens.radius.lg,
+        minHeight: 96,
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 8,
+      }}
+    >
+      <Muted tokens={tokens}>尚未添加到本地</Muted>
+    </View>
+  );
+
+  const actions = (
+    <View
+      style={{
+        width: compact ? undefined : 160,
+        gap: 6,
+        alignItems: compact ? "flex-start" : "center",
+        justifyContent: "center",
+        flexDirection: compact ? "row" : "column",
+        flexWrap: "wrap",
+      }}
+    >
+      {isPrivate ? (
+        <>
+          <Icon
+            name="LockKeyhole"
+            size={15}
+            color={tokens.colors.foregroundMuted}
+          />
+          <Muted tokens={tokens}>本地私有</Muted>
+        </>
+      ) : isCandidate ? (
+        <>
+          <Icon name="Link2" size={15} color={tokens.colors.accent} />
+          <Muted tokens={tokens}>发现同名资产</Muted>
+          <Button tokens={tokens} size="xs" onPress={onAssociate}>
+            关联已有本地
+          </Button>
+        </>
+      ) : isSharedOnly ? (
+        <>
+          <Icon
+            name="ArrowRight"
+            size={17}
+            color={tokens.colors.foregroundMuted}
+          />
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="default"
+            onPress={onEnable}
+            disabled={busy !== null}
+          >
+            添加到本地
+          </Button>
+        </>
+      ) : isRemoteDeleted ? (
+        <>
+          <Badge tokens={tokens} label="远端已删除" tone="danger" />
+          <Muted tokens={tokens}>本地副本仍保留</Muted>
+          <Button tokens={tokens} size="xs" onPress={onPublish}>
+            重新发布
+          </Button>
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onUnlink}>
+            保留为私有
+          </Button>
+        </>
+      ) : isRemoteUpdate ? (
+        <>
+          <Badge tokens={tokens} label="共享 → 本地" tone="warn" />
+          <Muted tokens={tokens}>共享端有新版本</Muted>
+          <Button
+            tokens={tokens}
+            size="xs"
+            icon="RefreshCw"
+            onPress={onEnable}
+            disabled={busy !== null}
+          >
+            同步到本地
+          </Button>
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onDiff}>
+            查看差异
+          </Button>
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onUnlink}>
+            移除关联
+          </Button>
+        </>
+      ) : isLocalUpdate || isDiverged ? (
+        <>
+          <Badge
+            tokens={tokens}
+            label={isDiverged ? "双方均有修改" : "本地 → 共享"}
+            tone={isDiverged ? "danger" : "warn"}
+          />
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant={isDiverged ? "ghost" : "secondary"}
+            onPress={onPublish}
+          >
+            选择发布
+          </Button>
+          {isDiverged ? (
+            <Button tokens={tokens} size="xs" onPress={onMerge}>
+              合并修改
+            </Button>
+          ) : null}
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onDiff}>
+            查看差异
+          </Button>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="ghost"
+            onPress={onDiscard}
+            disabled={busy !== null}
+          >
+            放弃本地修改
+          </Button>
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onUnlink}>
+            移除关联
+          </Button>
+        </>
+      ) : isSynced ? (
+        <>
+          <Icon name="Link2" size={13} color={tokens.colors.accent} />
+          <Muted tokens={tokens}>已同步关联</Muted>
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onUnlink}>
+            移除关联
+          </Button>
+          <Button tokens={tokens} size="xs" variant="ghost" onPress={onDiff}>
+            查看差异
+          </Button>
+        </>
+      ) : (
+        <Button tokens={tokens} size="xs" onPress={onEnable}>
+          添加到本地
+        </Button>
+      )}
+    </View>
+  );
+
+  if (compact) {
+    return (
+      <View style={{ gap: 8 }}>
+        {sharedCard}
+        {actions}
+        {localCard}
+      </View>
+    );
+  }
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "stretch",
+        gap: 10,
+      }}
+    >
+      {sharedCard}
+      {actions}
+      {localCard}
+    </View>
+  );
+}
+
+function ChangesView({
+  tokens,
+  drift,
+  selection,
+  onSelectionChange,
+  preview,
+  result,
+  busy,
+  onPreview,
+  onCommit,
+  onOpenPreview,
+  onClear,
+}: {
+  tokens: Tokens;
+  drift: DriftItem[];
+  selection: Selection[];
+  onSelectionChange: (value: Selection[]) => void;
+  preview: BatchPublishPreview | null;
+  result: BatchPublishResult | null;
+  busy: string | null;
+  onPreview: () => void;
+  onCommit: () => void;
+  onOpenPreview: () => void;
+  onClear: () => void;
+}) {
+  const publishable = drift.filter(
+    (item) => item.status === "local-update" || item.status === "diverged",
+  );
+  const selected = new Set(selection.map((entry) => entry.assetId));
+  return (
+    <Panel tokens={tokens}>
+      <SectionTitle tokens={tokens}>选择性批量发布</SectionTitle>
+      <Muted tokens={tokens}>
+        只发布勾选的资产；逐项校验，部分失败不阻断其余项；有未解决冲突的资产会被拒绝。预览过期时会自动重新加载，不会直接提交。
+      </Muted>
+      {publishable.length === 0 ? (
+        <Empty tokens={tokens}>当前没有可发布的本地修改。</Empty>
+      ) : null}
+      {publishable.map((item) => (
+        <Pressable
+          key={`${item.assetId}/${item.provider ?? ""}`}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: selected.has(item.assetId) }}
+          onPress={() =>
+            onSelectionChange(
+              selected.has(item.assetId)
+                ? selection.filter((entry) => entry.assetId !== item.assetId)
+                : [
+                    ...selection,
+                    {
+                      assetId: item.assetId,
+                      provider: item.provider ?? undefined,
+                    },
+                  ],
+            )
+          }
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            paddingVertical: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: tokens.colors.border,
+          }}
+          testID={`shared-assets-select-${item.name}`}
+        >
+          <Checkbox
+            tokens={tokens}
+            checked={selected.has(item.assetId)}
+            onPress={() =>
+              onSelectionChange(
+                selected.has(item.assetId)
+                  ? selection.filter((entry) => entry.assetId !== item.assetId)
+                  : [
+                      ...selection,
+                      {
+                        assetId: item.assetId,
+                        provider: item.provider ?? undefined,
+                      },
+                    ],
+              )
+            }
+          />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.base,
+              }}
+            >
+              {item.name}{" "}
+              <Text
+                style={{
+                  color: tokens.colors.foregroundMuted,
+                  fontSize: tokens.fontSize.xs,
+                }}
+              >
+                · {KIND_LABELS[item.kind]}
+                {item.provider ? ` · ${item.provider}` : ""}
+              </Text>
+            </Text>
+            <Mono tokens={tokens} numberOfLines={1}>
+              {item.targetPath}
+            </Mono>
+          </View>
+          <Badge
+            tokens={tokens}
+            label={ATTENTION_LABELS[item.status]}
+            tone={DRIFT_TONES[item.status]}
+          />
+        </Pressable>
+      ))}
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="default"
+          onPress={onPreview}
+          disabled={selection.length === 0 || busy !== null}
+          testID="shared-assets-batch-preview"
+        >
+          校验并预览
+        </Button>
+        <Button
+          tokens={tokens}
+          size="xs"
+          onPress={onOpenPreview}
+          disabled={!preview}
+          testID="shared-assets-batch-commit"
+        >
+          查看发布预览
+        </Button>
+        <Button tokens={tokens} size="xs" variant="ghost" onPress={onClear}>
+          清空选择
+        </Button>
+      </View>
+      {preview ? (
+        <View style={{ gap: 4 }}>
+          <Muted tokens={tokens}>
+            基线 revision {preview.expectedRevision.slice(0, 8)} ·{" "}
+            {preview.items.length} 项可发布
+          </Muted>
+          {preview.skipped.map((entry) => (
+            <Text
+              key={entry.assetId}
+              style={{
+                color: tokens.colors.warning,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              跳过 {entry.assetId}：{entry.reason}
+            </Text>
+          ))}
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="default"
+            style={{ alignSelf: "flex-start" }}
+            onPress={onCommit}
+            disabled={busy !== null}
+          >
+            确认发布
+          </Button>
+        </View>
+      ) : null}
+      {result ? (
+        <View
+          style={{
+            gap: 2,
+            borderTopWidth: 1,
+            borderTopColor: tokens.colors.border,
+            paddingTop: 8,
+          }}
+          testID="shared-assets-batch-result"
+        >
+          <Text
+            style={{
+              color: tokens.colors.foreground,
+              fontSize: tokens.fontSize.base,
+            }}
+          >
+            {result.commit
+              ? `已提交 ${result.commit.slice(0, 8)}`
+              : "没有写入提交"}
+          </Text>
+          <Text
+            style={{
+              color: tokens.colors.success,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            成功 {result.published.length} · 失败 {result.failed.length} · 跳过{" "}
+            {result.skipped.length}
+          </Text>
+          {result.failed.map((entry) => (
+            <Text
+              key={`fail-${entry.assetId}`}
+              style={{
+                color: tokens.colors.danger,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              {entry.assetId}: {entry.reason}
+            </Text>
+          ))}
+          <Muted tokens={tokens}>{result.pushHint}</Muted>
+        </View>
+      ) : null}
+    </Panel>
+  );
+}
+
+function DriftView({
+  tokens,
+  items,
+  busy,
+  onDiff,
+  onMerge,
+  onOverwrite,
+  onKeep,
+  onIgnore,
+  onPull,
+}: {
+  tokens: Tokens;
+  items: DriftItem[];
+  busy: string | null;
+  onDiff: (item: DriftItem) => void;
+  onMerge: (item: DriftItem) => void;
+  onOverwrite: (item: DriftItem) => void;
+  onKeep: (item: DriftItem) => void;
+  onIgnore: (item: DriftItem, ignored: boolean) => void;
+  onPull: () => void;
+}) {
+  return (
+    <Panel tokens={tokens}>
+      <SectionTitle
+        tokens={tokens}
+        trailing={
+          <Button
+            tokens={tokens}
+            size="xs"
+            icon="RefreshCw"
+            onPress={onPull}
+            disabled={busy !== null}
+            testID="shared-assets-workspace-pull"
+          >
+            刷新本地副本
+          </Button>
+        }
+      >
+        Drift 检测
+      </SectionTitle>
+      <Muted tokens={tokens}>
+        对比本地副本、共享仓库与上次同步基线；本地改动不会被自动覆盖。
+      </Muted>
+      {items.length === 0 ? (
+        <Empty tokens={tokens}>还没有可跟踪的投影资产。</Empty>
+      ) : null}
+      {items.map((item) => (
+        <View
+          key={`${item.assetId}/${item.provider ?? ""}`}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: tokens.colors.border,
+            paddingVertical: 8,
+            flexWrap: "wrap",
+          }}
+          testID={`shared-assets-drift-${item.name}`}
+        >
+          <View style={{ flex: 1, minWidth: 220, gap: 2 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.base,
+              }}
+            >
+              {item.name}{" "}
+              <Text
+                style={{
+                  color: tokens.colors.foregroundMuted,
+                  fontSize: tokens.fontSize.xs,
+                }}
+              >
+                · {KIND_LABELS[item.kind]}
+                {item.provider ? ` · ${item.provider}` : ""}
+              </Text>
+            </Text>
+            <Mono tokens={tokens} numberOfLines={1}>
+              {item.targetPath}
+            </Mono>
+            <Muted tokens={tokens}>
+              {item.files.length} 个文件
+              {item.files
+                .filter((file) => file.status !== "synced")
+                .slice(0, 3)
+                .map((file) => ` · ${file.path}`)
+                .join("")}
+            </Muted>
+          </View>
+          <Badge
+            tokens={tokens}
+            label={ATTENTION_LABELS[item.status]}
+            tone={DRIFT_TONES[item.status]}
+          />
+          {item.ignored ? (
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="ghost"
+              onPress={() => onIgnore(item, false)}
+              disabled={busy !== null}
+            >
+              恢复提醒
+            </Button>
+          ) : (
+            <>
+              <Button
+                tokens={tokens}
+                size="xs"
+                variant="ghost"
+                onPress={() => onDiff(item)}
+              >
+                查看差异
+              </Button>
+              <Button
+                tokens={tokens}
+                size="xs"
+                variant="ghost"
+                onPress={() => onMerge(item)}
+              >
+                合并
+              </Button>
+              <Button
+                tokens={tokens}
+                size="xs"
+                variant="ghost"
+                onPress={() => onOverwrite(item)}
+              >
+                覆盖本地
+              </Button>
+              <Button
+                tokens={tokens}
+                size="xs"
+                variant="ghost"
+                onPress={() => onKeep(item)}
+              >
+                保留并忽略
+              </Button>
+              <Button
+                tokens={tokens}
+                size="xs"
+                variant="ghost"
+                onPress={() => onIgnore(item, true)}
+              >
+                忽略
+              </Button>
+            </>
+          )}
+        </View>
+      ))}
+    </Panel>
+  );
+}
+
+function SettingsView({
+  tokens,
+  projectId,
+  workspaceId,
+  providers,
+  drift,
+  busy,
+  onIgnoreChange,
+  onNotice,
+}: {
+  tokens: Tokens;
+  projectId: string;
+  workspaceId: string | null;
+  providers: ProviderStatus[];
+  drift: DriftItem[];
+  busy: string | null;
+  onIgnoreChange: (item: DriftItem, ignored: boolean) => void;
+  onNotice: (value: string) => void;
+}) {
+  const ignoreGet = useRpc(ignoreRulesGetRpc);
+  const ignoreSet = useRpc(ignoreRulesSetRpc);
+  const migrateCall = useRpc(migrateLegacyRpc);
+  const [raw, setRaw] = useState("");
+  const [ignoreResult, setIgnoreResult] = useState<IgnoreRulesResult | null>(
+    null,
+  );
+  const [migration, setMigration] = useState<MigrationReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ignoreGet({ projectId })
+      .then(unwrap)
+      .then((value) => {
+        if (cancelled) return;
+        setRaw(value.raw);
+        setIgnoreResult(value as IgnoreRulesResult);
+      })
+      .catch((value) => {
+        if (!cancelled) setError(messageOf(value));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ignoreGet, projectId]);
+
+  const ignored = drift.filter((item) => item.ignored);
+  return (
+    <View style={{ gap: 12 }}>
+      <Panel tokens={tokens}>
+        <SectionTitle tokens={tokens}>Provider 矩阵</SectionTitle>
+        <Muted tokens={tokens}>
+          只有已验证的目录才会默认启用；未验证项会明确标注。
+        </Muted>
+        {providers.map((provider) => (
+          <View
+            key={provider.id}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingVertical: 6,
+              borderBottomWidth: 1,
+              borderBottomColor: tokens.colors.border,
+              flexWrap: "wrap",
+            }}
+          >
+            <View style={{ flex: 1, minWidth: 200 }}>
+              <Text
+                style={{
+                  color: tokens.colors.foreground,
+                  fontSize: tokens.fontSize.base,
+                }}
+              >
+                {provider.label}
+              </Text>
+              <Mono tokens={tokens}>
+                skill: {provider.skillRoot ?? "不投影"} · prompt:{" "}
+                {provider.instructionEntrypoint ?? "不投影"}
+              </Mono>
+              <Muted tokens={tokens}>{provider.note}</Muted>
+            </View>
+            <Badge
+              tokens={tokens}
+              label={provider.installed ? "已安装" : "未安装"}
+              tone={provider.installed ? "ok" : "muted"}
+            />
+            <Badge
+              tokens={tokens}
+              label={provider.skillVerified ? "已验证" : "未验证"}
+              tone={provider.skillVerified ? "ok" : "warn"}
+            />
+          </View>
+        ))}
+      </Panel>
+
+      <Panel tokens={tokens} style={{}}>
+        <SectionTitle tokens={tokens}>Ignore 规则</SectionTitle>
+        <Muted tokens={tokens}>
+          每行一条：path:&lt;glob&gt;、kind:&lt;skill|prompt|knowledge|doc&gt;、asset:&lt;assetId&gt;，也可以直接写路径。保存会提交到共享仓库。
+        </Muted>
+        <TextField
+          value={raw}
+          onChangeText={setRaw}
+          multiline
+          tokens={tokens}
+          testID="shared-assets-ignore-input"
+        />
+        {ignoreResult?.errors.map((entry) => (
+          <Text
+            key={`${entry.line}-${entry.message}`}
+            style={{
+              color: tokens.colors.danger,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            第 {entry.line} 行：{entry.message}
+          </Text>
+        ))}
+        {error ? (
+          <Text
+            style={{
+              color: tokens.colors.danger,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            {error}
+          </Text>
+        ) : null}
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="default"
+            disabled={busy !== null}
+            onPress={() => {
+              void ignoreSet({ projectId, raw })
+                .then(unwrap)
+                .then((value) => {
+                  const result = value as IgnoreRulesResult & {
+                    commit: string | null;
+                  };
+                  setIgnoreResult(result);
+                  setRaw(result.raw);
+                  onNotice(
+                    result.commit
+                      ? `忽略规则已保存并提交 ${result.commit.slice(0, 8)}`
+                      : "忽略规则已保存",
+                  );
+                })
+                .catch((value) => setError(messageOf(value)));
+            }}
+            testID="shared-assets-ignore-save"
+          >
+            保存规则
+          </Button>
+        </View>
+        {ignored.length > 0 ? (
+          <View style={{ gap: 4 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.base,
+                fontWeight: "600",
+              }}
+            >
+              项目级已忽略 · {ignored.length}
+            </Text>
+            {ignored.map((item) => (
+              <View
+                key={`${item.assetId}/${item.provider ?? ""}`}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingVertical: 4,
+                }}
+              >
+                <Text
+                  style={{
+                    color: tokens.colors.foreground,
+                    fontSize: tokens.fontSize.sm,
+                    flex: 1,
+                    minWidth: 0,
+                  }}
+                  numberOfLines={1}
+                  ellipsizeMode="middle"
+                >
+                  {item.name}
+                </Text>
+                <Muted tokens={tokens}>
+                  {KIND_LABELS[item.kind]}
+                  {item.provider ? ` · ${item.provider}` : ""}
+                </Muted>
+                <Button
+                  tokens={tokens}
+                  size="xs"
+                  variant="ghost"
+                  onPress={() => onIgnoreChange(item, false)}
+                >
+                  恢复提醒
+                </Button>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </Panel>
+
+      <Panel tokens={tokens}>
+        <SectionTitle tokens={tokens}>.agentstorm/ 一次性迁移</SectionTitle>
+        <Muted tokens={tokens}>
+          只读导入 AGENTS.md、knowledge、docs 到共享 checkout；workflows
+          跳过，源目录不删除，冲突项不覆盖。
+        </Muted>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="default"
+            disabled={!workspaceId || busy !== null}
+            onPress={() =>
+              workspaceId &&
+              void migrateCall({ projectId, workspaceId, dryRun: true })
+                .then(unwrap)
+                .then((value) => setMigration(value as MigrationReport))
+                .catch((value) => setError(messageOf(value)))
+            }
+            testID="shared-assets-migrate-preview"
+          >
+            预览迁移
+          </Button>
+          <Button
+            tokens={tokens}
+            size="xs"
+            disabled={
+              !workspaceId ||
+              !migration ||
+              !migration.files.some((file) => file.action === "import")
+            }
+            onPress={() =>
+              workspaceId &&
+              void migrateCall({ projectId, workspaceId, dryRun: false })
+                .then(unwrap)
+                .then((value) => {
+                  setMigration(value as MigrationReport);
+                  onNotice("迁移已执行");
+                })
+                .catch((value) => setError(messageOf(value)))
+            }
+            testID="shared-assets-migrate-apply"
+          >
+            执行导入
+          </Button>
+        </View>
+        {migration ? (
+          <View style={{ gap: 2 }}>
+            <Muted tokens={tokens}>
+              {migration.dryRun
+                ? "预览"
+                : migration.applied
+                  ? "已导入"
+                  : "无变更"}
+              {migration.reused ? "（源未变化，复用上次结果）" : ""} · 源{" "}
+              {migration.before.files} 个文件 → 目标 {migration.after.files}{" "}
+              个文件
+            </Muted>
+            {migration.files.map((file) => (
+              <Text
+                key={`${file.sourcePath}-${file.repositoryPath}`}
+                style={{
+                  color:
+                    file.action === "conflict"
+                      ? tokens.colors.danger
+                      : file.action === "import"
+                        ? tokens.colors.success
+                        : tokens.colors.foregroundMuted,
+                  fontSize: tokens.fontSize.sm,
+                }}
+              >
+                {file.action}: {file.sourcePath} → {file.repositoryPath}
+                {file.reason ? `（${file.reason}）` : ""}
+              </Text>
+            ))}
+            {migration.candidates.skills.length > 0 ? (
+              <Muted tokens={tokens}>
+                可发布 Skill 候选：{migration.candidates.skills.join(", ")}
+              </Muted>
+            ) : null}
+          </View>
+        ) : null}
+      </Panel>
+    </View>
+  );
+}
+
+function AssociationDialog({
+  row,
+  tokens,
+  busy,
+  onClose,
+  onAdopt,
+}: {
+  row: AssetRelationshipRow | null;
+  tokens: Tokens;
+  busy: boolean;
+  onClose: () => void;
+  onAdopt: (mode: "preserve-local" | "use-remote") => void;
+}) {
+  return (
+    <Dialog
+      open={row !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title="关联已有本地资产"
+    >
+      {row?.shared && row.local ? (
+        <>
+          <Muted tokens={tokens}>
+            本地「{row.local.name}」与共享「{row.shared.name}
+            」同名。选择关联方式：
+          </Muted>
+          <View style={{ gap: 8 }}>
+            <Button
+              tokens={tokens}
+              variant="default"
+              onPress={() => onAdopt("preserve-local")}
+              disabled={busy}
+              testID="shared-assets-adopt-preserve"
+            >
+              保留本地版本并关联
+            </Button>
+            <Button
+              tokens={tokens}
+              variant="secondary"
+              onPress={() => onAdopt("use-remote")}
+              disabled={busy}
+              testID="shared-assets-adopt-remote"
+            >
+              使用共享版本并关联
+            </Button>
+            <Button tokens={tokens} variant="ghost" onPress={onClose}>
+              取消
+            </Button>
+          </View>
+        </>
+      ) : null}
+    </Dialog>
+  );
+}
+
+function UnlinkDialog({
+  rows,
+  tokens,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  rows: AssetRelationshipRow[];
+  tokens: Tokens;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (deleteLocal: boolean) => void;
+}) {
+  const [deleteLocal, setDeleteLocal] = useState(false);
+  const row = rows[0];
+  const hasChanges =
+    row?.syncStatus === "local-update" ||
+    row?.syncStatus === "diverged" ||
+    (row?.driftFiles ?? 0) > 0;
+  return (
+    <Dialog
+      open={rows.length > 0}
+      onOpenChange={(open) => {
+        if (!open) {
+          setDeleteLocal(false);
+          onClose();
+        }
+      }}
+      title="移除共享资产关联"
+    >
+      {row?.shared ? (
+        <>
+          <Muted tokens={tokens}>
+            「{row.shared.name}」将不再关联共享仓库。共享仓库中的版本不受影响。
+          </Muted>
+          {hasChanges ? (
+            <Alert
+              tone="warning"
+              title="本地有未保存的修改"
+              description="如果勾选删除本地资产，这些修改将无法恢复。"
+              tokens={tokens}
+            />
+          ) : null}
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: deleteLocal }}
+            onPress={() => setDeleteLocal((value) => !value)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+          >
+            <Checkbox
+              tokens={tokens}
+              checked={deleteLocal}
+              onPress={() => setDeleteLocal((value) => !value)}
+            />
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.base,
+              }}
+            >
+              同时删除本地受管副本
+            </Text>
+          </Pressable>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Button
+              tokens={tokens}
+              variant={deleteLocal ? "danger" : "default"}
+              onPress={() => onConfirm(deleteLocal)}
+              disabled={busy}
+              testID="shared-assets-unlink-confirm"
+            >
+              {busy ? "处理中…" : deleteLocal ? "删除并移除关联" : "仅移除关联"}
+            </Button>
+            <Button tokens={tokens} variant="ghost" onPress={onClose}>
+              取消
+            </Button>
+          </View>
+        </>
+      ) : null}
+    </Dialog>
+  );
+}
+
+function BatchUnlinkDialog({
+  rows,
+  tokens,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  rows: AssetRelationshipRow[];
+  tokens: Tokens;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (deleteLocal: boolean) => void;
+}) {
+  const [deleteLocal, setDeleteLocal] = useState(false);
+  const hasChanges = rows.some(
+    (row) =>
+      row.syncStatus === "local-update" ||
+      row.syncStatus === "diverged" ||
+      row.driftFiles > 0,
+  );
+  return (
+    <Dialog
+      open={rows.length > 0}
+      onOpenChange={(open) => {
+        if (!open) {
+          setDeleteLocal(false);
+          onClose();
+        }
+      }}
+      title="批量移除关联"
+    >
+      <Muted tokens={tokens}>
+        将解除 {rows.length}{" "}
+        项本地资产与共享仓库的关联。共享仓库中的版本不受影响。
+      </Muted>
+      {hasChanges ? (
+        <Alert
+          tone="warning"
+          title="部分本地资产有未保存修改"
+          description="勾选删除本地资产会移除这些修改，且无法恢复。"
+          tokens={tokens}
+        />
+      ) : null}
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: deleteLocal }}
+        onPress={() => setDeleteLocal((value) => !value)}
+        style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+      >
+        <Checkbox
+          tokens={tokens}
+          checked={deleteLocal}
+          onPress={() => setDeleteLocal((value) => !value)}
+        />
+        <Text
+          style={{
+            color: tokens.colors.foreground,
+            fontSize: tokens.fontSize.base,
+          }}
+        >
+          同时删除这些本地受管副本
+        </Text>
+      </Pressable>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Button
+          tokens={tokens}
+          variant={deleteLocal ? "danger" : "default"}
+          onPress={() => onConfirm(deleteLocal)}
+          disabled={busy}
+          testID="shared-assets-batch-unlink-confirm"
+        >
+          {busy ? "处理中…" : deleteLocal ? "删除并移除关联" : "仅移除关联"}
+        </Button>
+        <Button tokens={tokens} variant="ghost" onPress={onClose}>
+          取消
+        </Button>
+      </View>
+    </Dialog>
+  );
+}
+
+function PublishPreviewDialog({
+  open,
+  preview,
+  tokens,
+  busy,
+  onClose,
+  onCommit,
+}: {
+  open: boolean;
+  preview: BatchPublishPreview | null;
+  tokens: Tokens;
+  busy: boolean;
+  onClose: () => void;
+  onCommit: () => void;
+}) {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(value) => !value && onClose()}
+      title="发布预览"
+    >
+      {preview ? (
+        <>
+          <Muted tokens={tokens}>
+            基于 revision {preview.expectedRevision.slice(0, 8)}
+            。逐项校验，部分失败不阻断其余项。
+          </Muted>
+          <ScrollView style={{ maxHeight: 360 }}>
+            {preview.items.map((item) => (
+              <View
+                key={item.assetId}
+                style={{
+                  gap: 4,
+                  paddingVertical: 6,
+                  borderBottomWidth: 1,
+                  borderBottomColor: tokens.colors.border,
+                }}
+              >
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <Text
+                    style={{
+                      color: tokens.colors.foreground,
+                      fontSize: tokens.fontSize.base,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {item.name}
+                  </Text>
+                  <Badge
+                    tokens={tokens}
+                    label={item.state}
+                    tone={
+                      item.state === "eligible"
+                        ? "ok"
+                        : item.state === "warning"
+                          ? "warn"
+                          : "danger"
+                    }
+                  />
+                </View>
+                {item.reasons.map((reason) => (
+                  <Text
+                    key={reason.code}
+                    style={{
+                      color: tokens.colors.danger,
+                      fontSize: tokens.fontSize.sm,
+                    }}
+                  >
+                    {reason.code}: {reason.message}
+                  </Text>
+                ))}
+                <Mono tokens={tokens} numberOfLines={6}>
+                  {item.diff.slice(0, 1200) || "(无差异)"}
+                </Mono>
+              </View>
+            ))}
+          </ScrollView>
+          {preview.skipped.map((entry) => (
+            <Text
+              key={entry.assetId}
+              style={{
+                color: tokens.colors.warning,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              跳过 {entry.assetId}：{entry.reason}
+            </Text>
+          ))}
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Button
+              tokens={tokens}
+              variant="default"
+              onPress={onCommit}
+              disabled={busy}
+              testID="shared-assets-publish-confirm"
+            >
+              {busy ? "发布中…" : "确认发布"}
+            </Button>
+            <Button tokens={tokens} variant="ghost" onPress={onClose}>
+              返回
+            </Button>
+          </View>
+        </>
+      ) : (
+        <Muted tokens={tokens}>正在生成预览…</Muted>
+      )}
+    </Dialog>
+  );
+}
+
+function DiffDialog({
+  dialog,
+  tokens,
+  onClose,
+}: {
+  dialog: { title: string; result: AssetDiffResult | null } | null;
+  tokens: Tokens;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog
+      open={dialog !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title={dialog?.title ?? "差异"}
+      width={760}
+    >
+      {dialog?.result ? (
+        dialog.result.kind === "binary" ? (
+          <Muted tokens={tokens}>二进制文件，仅支持覆盖或保留。</Muted>
+        ) : (
+          <ScrollView style={{ maxHeight: 460 }}>
+            <Text
+              style={{ color: tokens.colors.foregroundMuted, fontSize: 12 }}
+            >
+              基线 → 本地
+            </Text>
+            <Mono tokens={tokens}>{dialog.result.localDiff || "(无变化)"}</Mono>
+            <Text
+              style={{
+                color: tokens.colors.foregroundMuted,
+                fontSize: 12,
+                marginTop: 8,
+              }}
+            >
+              基线 → 共享
+            </Text>
+            <Mono tokens={tokens}>
+              {dialog.result.remoteDiff || "(无变化)"}
+            </Mono>
+          </ScrollView>
+        )
+      ) : (
+        <Spinner tokens={tokens} />
+      )}
+    </Dialog>
+  );
+}
+
+function MergeDialog({
+  dialog,
+  tokens,
+  busy,
+  onClose,
+  onApply,
+}: {
+  dialog: {
+    assetId: string;
+    path?: string;
+    provider?: string;
+    preview: MergePreviewResult | null;
+  } | null;
+  tokens: Tokens;
+  busy: boolean;
+  onClose: () => void;
+  onApply: (resolutions: MergeResolution[]) => void;
+}) {
+  const [choices, setChoices] = useState<Record<string, MergeResolution>>({});
+  const preview = dialog?.preview;
+  const unresolved = (preview?.conflicts ?? []).some(
+    (conflict) => !choices[conflict.id],
+  );
+  return (
+    <Dialog
+      open={dialog !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title="三方合并"
+      width={760}
+    >
+      {preview ? (
+        <>
+          <Muted tokens={tokens}>
+            {preview.conflicts.length === 0
+              ? "无冲突，可直接应用自动合并结果。"
+              : `${preview.conflicts.length} 个冲突块，未全部选择前不能保存。`}
+          </Muted>
+          <ScrollView style={{ maxHeight: 380 }}>
+            {preview.conflicts.map((conflict) => {
+              const current = choices[conflict.id];
+              return (
+                <View
+                  key={conflict.id}
+                  style={{
+                    gap: 4,
+                    paddingVertical: 8,
+                    borderBottomWidth: 1,
+                    borderBottomColor: tokens.colors.border,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: tokens.colors.foreground,
+                      fontWeight: "600",
+                    }}
+                  >
+                    冲突 {conflict.id}
+                  </Text>
+                  <Muted tokens={tokens}>本地</Muted>
+                  <Mono tokens={tokens}>{conflict.local}</Mono>
+                  <Muted tokens={tokens}>共享</Muted>
+                  <Mono tokens={tokens}>{conflict.remote}</Mono>
+                  <View
+                    style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}
+                  >
+                    {(["local", "remote", "both", "custom"] as const).map(
+                      (choice) => (
+                        <Button
+                          key={choice}
+                          tokens={tokens}
+                          size="xs"
+                          variant={
+                            current?.choice === choice ? "default" : "secondary"
+                          }
+                          onPress={() =>
+                            setChoices((value) => ({
+                              ...value,
+                              [conflict.id]: {
+                                conflictId: conflict.id,
+                                choice,
+                                content:
+                                  choice === "custom"
+                                    ? (value[conflict.id]?.content ??
+                                      `${conflict.local}\n${conflict.remote}`)
+                                    : undefined,
+                              },
+                            }))
+                          }
+                          testID={`shared-assets-conflict-${conflict.id}-${choice}`}
+                        >
+                          {choice === "local"
+                            ? "采用本地"
+                            : choice === "remote"
+                              ? "采用共享"
+                              : choice === "both"
+                                ? "两者保留"
+                                : "自定义"}
+                        </Button>
+                      ),
+                    )}
+                  </View>
+                  {current?.choice === "custom" ? (
+                    <TextField
+                      value={current.content ?? ""}
+                      onChangeText={(content) =>
+                        setChoices((value) => ({
+                          ...value,
+                          [conflict.id]: {
+                            conflictId: conflict.id,
+                            choice: "custom",
+                            content,
+                          },
+                        }))
+                      }
+                      multiline
+                      tokens={tokens}
+                    />
+                  ) : null}
+                </View>
+              );
+            })}
+          </ScrollView>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Button
+              tokens={tokens}
+              variant="default"
+              disabled={busy || unresolved}
+              onPress={() =>
+                onApply(
+                  preview.conflicts.map(
+                    (conflict) =>
+                      choices[conflict.id] ?? {
+                        conflictId: conflict.id,
+                        choice: "local",
+                      },
+                  ),
+                )
+              }
+              testID="shared-assets-merge-apply"
+            >
+              {busy
+                ? "合并中…"
+                : unresolved
+                  ? "还有冲突未解决"
+                  : "保存合并结果"}
+            </Button>
+            <Button tokens={tokens} variant="ghost" onPress={onClose}>
+              关闭
+            </Button>
+          </View>
+        </>
+      ) : (
+        <Spinner tokens={tokens} />
+      )}
+    </Dialog>
+  );
+}
+
+function ReadDialog({
+  dialog,
+  tokens,
+  onClose,
+}: {
+  dialog: { title: string; result: AssetReadResult } | null;
+  tokens: Tokens;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog
+      open={dialog !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title={dialog?.title ?? "预览"}
+      width={760}
+    >
+      {dialog?.result.kind === "image" && dialog.result.dataUri ? (
+        <Image
+          source={{ uri: dialog.result.dataUri }}
+          style={{ width: "100%", height: 360, resizeMode: "contain" }}
+        />
+      ) : dialog?.result.kind === "binary" ? (
+        <Muted tokens={tokens}>二进制附件 · {dialog.result.size} bytes</Muted>
+      ) : (
+        <ScrollView style={{ maxHeight: 460 }}>
+          <Mono tokens={tokens}>
+            {dialog?.result.content ?? ""}
+            {dialog?.result.truncated ? "\n… (已截断)" : ""}
+          </Mono>
+        </ScrollView>
+      )}
+    </Dialog>
+  );
+}
+
+function IgnoreRulesDialog({
+  open,
+  tokens,
+  projectId,
+  drift,
+  busy,
+  onClose,
+  onRestore,
+}: {
+  open: boolean;
+  tokens: Tokens;
+  projectId: string;
+  drift: DriftItem[];
+  busy: boolean;
+  onClose: () => void;
+  onRestore: (item: DriftItem) => void;
+}) {
+  const ignoreGet = useRpc(ignoreRulesGetRpc);
+  const ignoreSet = useRpc(ignoreRulesSetRpc);
+  const [raw, setRaw] = useState("");
+  const [errors, setErrors] = useState<IgnoreRulesResult["errors"]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const ignored = drift.filter((item) => item.ignored);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void ignoreGet({ projectId })
+      .then(unwrap)
+      .then((value) => {
+        if (cancelled) return;
+        setRaw(value.raw);
+        setErrors(value.errors);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ignoreGet, open, projectId]);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(value) => !value && onClose()}
+      title="忽略规则"
+    >
+      <Muted tokens={tokens}>
+        全局规则随共享仓库同步；项目级已忽略只影响当前项目的提醒。
+      </Muted>
+      <TextField
+        value={raw}
+        onChangeText={setRaw}
+        multiline
+        tokens={tokens}
+        testID="shared-assets-ignore-dialog-input"
+      />
+      {errors.map((entry) => (
+        <Text
+          key={`${entry.line}-${entry.message}`}
+          style={{ color: tokens.colors.danger, fontSize: tokens.fontSize.sm }}
+        >
+          第 {entry.line} 行：{entry.message}
+        </Text>
+      ))}
+      {notice ? (
+        <Text
+          style={{ color: tokens.colors.success, fontSize: tokens.fontSize.sm }}
+        >
+          {notice}
+        </Text>
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Button
+          tokens={tokens}
+          size="xs"
+          variant="default"
+          disabled={busy}
+          onPress={() => {
+            void ignoreSet({ projectId, raw })
+              .then(unwrap)
+              .then((value) => {
+                setErrors(value.errors);
+                setRaw(value.raw);
+                setNotice("忽略规则已保存");
+              })
+              .catch(() => setNotice("保存失败"));
+          }}
+        >
+          保存规则
+        </Button>
+        <Button tokens={tokens} size="xs" variant="ghost" onPress={onClose}>
+          关闭
+        </Button>
+      </View>
+      <Divider tokens={tokens} />
+      <Text
+        style={{
+          color: tokens.colors.foreground,
+          fontSize: tokens.fontSize.base,
+          fontWeight: "600",
+        }}
+      >
+        项目级已忽略 · {ignored.length}
+      </Text>
+      {ignored.map((item) => (
+        <View
+          key={`${item.assetId}/${item.provider ?? ""}`}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingVertical: 4,
+          }}
+        >
+          <Text
+            style={{
+              color: tokens.colors.foreground,
+              fontSize: tokens.fontSize.sm,
+              flex: 1,
+              minWidth: 0,
+            }}
+            numberOfLines={1}
+            ellipsizeMode="middle"
+          >
+            {item.name}
+          </Text>
+          <Muted tokens={tokens}>
+            {KIND_LABELS[item.kind]}
+            {item.provider ? ` · ${item.provider}` : ""}
+          </Muted>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="ghost"
+            onPress={() => onRestore(item)}
+          >
+            恢复提醒
+          </Button>
+        </View>
+      ))}
+    </Dialog>
   );
 }

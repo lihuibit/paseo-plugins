@@ -411,8 +411,8 @@ export async function listDrift(
             : partial.kind === "doc"
               ? `docs/${partial.name}`
               : partial.assetId.replace(
-                  /^skill:(project|global)\//,
-                  "skills/$1/",
+                  /^skill:project\//,
+                  "skills/project/",
                 )));
     const ignored =
       isRuleIgnored(

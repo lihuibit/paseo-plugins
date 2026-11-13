@@ -3,7 +3,7 @@ import type { RpcError } from "./errors";
 
 export type SyncMode = "auto" | "manual";
 export type AssetKind = "skill" | "prompt" | "knowledge" | "doc";
-export type SkillScope = "project" | "global";
+export type SkillScope = "project";
 export type ProviderId =
   "codex" | "claude" | "pi" | "copilot" | "opencode" | "antigravity" | "muse";
 export type ProviderSelection = ProviderId | "both";
@@ -82,6 +82,22 @@ export interface WorkspaceSummary {
   background: boolean;
 }
 
+export interface ProjectAttentionItem {
+  kind: AssetKind;
+  provider: ProviderId | null;
+  scope: SkillScope | null;
+  name: string;
+  reason: DriftStatus;
+  ignored: boolean;
+}
+
+export interface ProjectAttention {
+  items: ProjectAttentionItem[];
+  conflicts: number;
+  unpublished: number;
+  ignored: number;
+}
+
 export interface ProjectSummary {
   projectId: string;
   displayName: string;
@@ -90,6 +106,13 @@ export interface ProjectSummary {
   libraryId: string | null;
   syncMode: SyncMode | null;
   workspaces: WorkspaceSummary[];
+  workspaceId: string | null;
+  workspaceName: string | null;
+  workspaceDirectory: string | null;
+  repoUrl: string | null;
+  branch: string | null;
+  state: BindingState | null;
+  attention: ProjectAttention;
 }
 
 export interface AssetFile {
@@ -317,6 +340,46 @@ export interface DriftIgnoreEntry {
   path: string | null;
   reason: string;
   ignoredAt: string;
+}
+
+export type AssetRelationship =
+  "linked" | "candidate" | "private" | "shared-only";
+
+export interface LocalAssetSummary {
+  /** Local-only identity; never stored in the shared repository. */
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  provider: ProviderId | null;
+  path: string;
+  description: string | null;
+  fileCount: number;
+  totalBytes: number;
+  warnings: string[];
+}
+
+export interface AssetRelationshipRow {
+  id: string;
+  relationship: AssetRelationship;
+  shared: AssetSummary | null;
+  local: LocalAssetSummary | null;
+  syncStatus: DriftStatus | null;
+  driftFiles: number;
+}
+
+export interface RelationshipListResult {
+  kind: AssetKind;
+  provider: ProviderId | null;
+  rows: AssetRelationshipRow[];
+  ignored: DriftIgnoreEntry[];
+  warnings: string[];
+}
+
+export interface UnlinkResult {
+  assetId: string;
+  deleted: string[];
+  kept: string[];
+  hadLocalChanges: boolean;
 }
 
 export interface MigrationFilePlan {

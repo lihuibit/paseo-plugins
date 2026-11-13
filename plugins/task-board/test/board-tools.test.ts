@@ -618,7 +618,7 @@ describe("board tools", () => {
       agentId: "agent_child",
     });
     const current = await service.get(task.id);
-    await service.setStatus(task.id, "in_review", current.revision);
+    await service.setStatus(paseo, task.id, "in_review", current.revision);
 
     const waited = await toolByName(
       paseo,
