@@ -24,6 +24,9 @@ scripts/sync-core.mjs       把 packages/core/src 生成到插件 shared/core
 scripts/e2e-setup.mjs       创建测试 Git 仓库与测试项目
 scripts/e2e-rpc.mjs         通过 Paseo SDK 调用插件 RPC 的端到端脚本
 scripts/verify-persisted.mjs 重启/重装后的持久化检查
+scripts/release-regression.sh 干净 home 安装 → smoke → 重启 → 卸载回归
+scripts/release-upgrade.sh  升级到指定 revision 并校验数据保留
+scripts/release-smoke.mjs   发布 smoke（共享资产绑定/投影 + 看板卡片）
 ```
 
 Paseo 的插件编译器只允许插件目录内（`client/`、`server/`、`shared/`）的模块进入
