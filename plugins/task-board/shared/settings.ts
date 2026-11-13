@@ -27,6 +27,7 @@ export const BoardSettingsSchema = z
       retries: 3,
     }),
     timezone: z.string().trim().min(1).optional(),
+    planningPrompt: z.string().default(""),
   })
   .strict();
 export type BoardSettings = z.infer<typeof BoardSettingsSchema>;
@@ -35,6 +36,7 @@ export const BoardSettingsPatchSchema = z
   .object({
     wecom: WeComSettingsSchema.partial().optional(),
     timezone: z.string().trim().min(1).nullable().optional(),
+    planningPrompt: z.string().nullable().optional(),
   })
   .strict();
 export type BoardSettingsPatch = z.infer<typeof BoardSettingsPatchSchema>;

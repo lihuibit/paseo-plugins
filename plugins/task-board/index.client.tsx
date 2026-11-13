@@ -5,7 +5,7 @@ import { TaskBoardSidebarItem } from "./client/sidebar";
 export default function contribute(client: PluginClientContext) {
   client.addScreen({
     id: "task-board",
-    title: "任务看板",
+    title: "任务",
     Component: TaskBoardScreen,
   });
   client.addSidebarHeaderItem({

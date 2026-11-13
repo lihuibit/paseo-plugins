@@ -7,6 +7,8 @@ Paseo 插件 monorepo。
 - `task-board`：Agent 驱动的任务看板，支持卡片、分配 Agent、启动/停止、
   `agent.turn.*` / `agent.permission.*` / `agent.close.after` hooks、
   `board_declare`、定时与周期任务、WeCom 通知、父子任务和旧任务迁移。
+- `paseo-board`：任务看板 CLI，供普通 shell 和外部 Agent（如 Claude Code）使用，
+  不需要 MCP，调用方也不需要安装插件。
 
 ## 环境要求
 
@@ -18,6 +20,7 @@ Paseo 插件 monorepo。
 
 ```text
 packages/core/              纯逻辑：路径校验、diff、Skill frontmatter、Provider 矩阵
+packages/board-cli/         看板 CLI（bin: paseo-board）
 plugins/shared-assets/      插件本体（server + client + shared 契约）
 plugins/task-board/         任务看板插件（server + client + shared 契约）
 scripts/sync-core.mjs       把 packages/core/src 生成到插件 shared/core
@@ -27,6 +30,9 @@ scripts/verify-persisted.mjs 重启/重装后的持久化检查
 scripts/release-regression.sh 干净 home 安装 → smoke → 重启 → 卸载回归
 scripts/release-upgrade.sh  升级到指定 revision 并校验数据保留
 scripts/release-smoke.mjs   发布 smoke（共享资产绑定/投影 + 看板卡片）
+scripts/e2e-board-cli.mjs   外部 shell 调用 paseo-board 的端到端脚本
+scripts/release-cli.sh      构建并把 CLI 装进临时 prefix 后跑完整生命周期
+scripts/e2e-planning-smoke.mjs 规划卡片 systemPrompt 与 board_* 工具 smoke
 ```
 
 Paseo 的插件编译器只允许插件目录内（`client/`、`server/`、`shared/`）的模块进入
@@ -263,8 +269,8 @@ npm run verify        # check:core + typecheck + lint + test
 npm run format:check
 ```
 
-`npm run verify` 覆盖 `packages/core`、`shared-assets`、`task-board` 三个 workspace。
-CI 不需要 Paseo daemon；端到端与发布回归另跑。
+`npm run verify` 覆盖 `packages/core`、`board-cli`、`shared-assets`、
+`task-board` 四个 workspace。CI 不需要 Paseo daemon；端到端与发布回归另跑。
 
 ### 发布回归（干净 home）
 
@@ -277,6 +283,12 @@ PASEO_RELEASE_HOME=~/.paseo-plugin-test scripts/release-regression.sh
 
 # 单独验证版本约束（期望安装被拒并提示 requirements.paseo）
 PASEO_RELEASE_HOME=~/.paseo-plugin-test scripts/check-version-constraint.sh
+
+# 构建 CLI → 安装到临时 prefix → list/status/logs/create/assign/start/stop/done
+PASEO_RELEASE_HOME=~/.paseo-plugin-test scripts/release-cli.sh
+
+# 规划卡片：systemPrompt 含 G0/G5，且规划 Agent 能调用 board_get
+PASEO_RELEASE_HOME=~/.paseo-plugin-test npm run e2e:planning-smoke
 ```
 
 升级回归需要两个已提交的 revision：
@@ -338,6 +350,57 @@ I4 的补齐（permission hooks、定时/周期、WeCom、层级、迁移、UI�
 ```bash
 npm run e2e:i4             # dev daemon：定时重启、recurring、permission、WeCom、层级
 npm run e2e:i4-migrate     # 独立 home（6769）：迁移只读与 UI 种子数据
+```
+
+### 看板 CLI（外部 Agent）
+
+`paseo-board` 让普通 shell 和外部 Agent 直接管理看板，不需要 MCP，调用方也
+不需要安装插件：
+
+```bash
+npm install
+npm run build:cli
+npm install -g ./packages/board-cli
+
+export PASEO_BOARD_URL=http://127.0.0.1:6769
+export PASEO_BOARD_PASSWORD="$(cat ~/.paseo-plugin-test/local-credential)"
+
+paseo-board list --status in_review
+paseo-board status TASK-42 --json
+paseo-board logs TASK-42 --tail 30 --filter tools
+paseo-board send TASK-42 "补充测试" --wait 90
+paseo-board create "拆解发布任务" --kind task-planning --json
+```
+
+`--json` 可直接 `JSON.parse`；退出码 0 成功、1 业务错误、2 参数错误、
+3 连接/鉴权错误。`--home` 只读取 `daemon.listen`，密码仍需
+`PASEO_BOARD_PASSWORD` 或 `--password`。完整命令、Claude Code
+`Bash(paseo-board:*)` 示例和 Agent 工具对照见
+[`packages/board-cli/README.md`](packages/board-cli/README.md)。
+
+外部 Claude Code 只需再加一条 Bash allowlist，不需要 MCP 或插件：
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(paseo-board:*)"]
+  }
+}
+```
+
+```bash
+export PASEO_BOARD_URL=http://127.0.0.1:6769
+export PASEO_BOARD_PASSWORD="$(cat ~/.paseo-plugin-test/local-credential)"
+claude
+# 在会话中让 Agent 执行：
+# paseo-board list --json
+# paseo-board status TASK-42 --json
+```
+
+独立 home 的端到端验证：
+
+```bash
+E2E_PASEO_HOME=~/.paseo-plugin-test E2E_PASEO_PORT=6769 npm run e2e:board-cli
 ```
 
 ## 仍不包含

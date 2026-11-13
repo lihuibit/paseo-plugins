@@ -1,13 +1,15 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { AgentToolDefinition } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
-import { BOARD_LABEL } from "../shared/core/board/types";
+import { BOARD_ADMIN_LABEL, BOARD_LABEL } from "../shared/core/board/types";
+import { toolsForLabels } from "./board-tools";
 import type { TaskBoardService } from "./service";
 
 export function registerHooks(
   server: PluginServerContext,
   service: TaskBoardService,
   declareTool: AgentToolDefinition,
+  adminTools: AgentToolDefinition[],
   ensureReady: (paseo: PaseoApi) => Promise<void>,
 ): void {
   server.addHook("agent.create.after", async ({ agent }, context) => {
@@ -21,13 +23,22 @@ export function registerHooks(
   });
 
   server.addHook("agent.open.before", async ({ request }, context) => {
-    if (request.labels[BOARD_LABEL] !== "1") return;
+    const isBoard = request.labels[BOARD_LABEL] === "1";
+    const isAdmin = request.labels[BOARD_ADMIN_LABEL] === "1";
+    if (!isBoard && !isAdmin) return;
     await ensureReady(context.paseo);
     await service.bindAgentFromOpen(request.agentId, { ...request.labels });
     if (request.purpose === "history") return;
+    const injected = toolsForLabels(
+      request.labels,
+      declareTool,
+      adminTools,
+    ).filter(
+      (tool) => !request.tools.some((existing) => existing.name === tool.name),
+    );
     return {
       ...request,
-      tools: [...request.tools, declareTool],
+      tools: [...request.tools, ...injected],
     };
   });
 

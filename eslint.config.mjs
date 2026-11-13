@@ -8,6 +8,7 @@ export default tseslint.config(
       "plugins/shared-assets/shared/core/**",
       "plugins/task-board/shared/core/**",
       "plugins/shared-assets/.paseo/**",
+      "packages/board-cli/dist/**",
     ],
   },
   eslint.configs.recommended,
@@ -22,7 +23,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.mjs"],
+    files: ["**/*.mjs", "packages/board-cli/bin/**/*.js"],
     languageOptions: {
       globals: {
         Buffer: "readonly",

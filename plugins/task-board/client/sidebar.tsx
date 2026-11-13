@@ -33,8 +33,8 @@ export function TaskBoardSidebarItem({
 
   return (
     <SidebarRow
-      icon="SquareKanban"
-      label="任务看板"
+      icon="CheckSquare"
+      label="任务"
       active={currentScreen?.screenId === "task-board"}
       onPress={() => openScreen({ screenId: "task-board" })}
       trailing={

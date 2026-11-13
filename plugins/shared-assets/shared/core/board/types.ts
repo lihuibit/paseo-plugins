@@ -23,6 +23,9 @@ export const BoardPrioritySchema = z.enum([
 ]);
 export type BoardPriority = z.infer<typeof BoardPrioritySchema>;
 
+export const BoardTaskKindSchema = z.enum(["task", "task-planning"]);
+export type BoardTaskKind = z.infer<typeof BoardTaskKindSchema>;
+
 export const BlockReasonSchema = z.enum([
   "agent_error",
   "agent_silent",
@@ -140,6 +143,7 @@ export type BoardProgress = z.infer<typeof BoardProgressSchema>;
 export const BOARD_LABEL = "agentstorm.board";
 export const BOARD_TASK_LABEL = "agentstorm.task-id";
 export const BOARD_KIND_LABEL = "agentstorm.kind";
+export const BOARD_ADMIN_LABEL = "agentstorm.board-admin";
 export const BOARD_METADATA_KEY = "agentstorm.task-board";
 
 const AgentExecutionProjectSchema = z
@@ -191,6 +195,7 @@ export const BoardAssignmentAgentSchema = z.discriminatedUnion("kind", [
       model: z.string().min(1).optional(),
       modeId: z.string().min(1).optional(),
       thinkingOptionId: z.string().min(1).optional(),
+      options: z.record(z.string(), z.unknown()).optional(),
       instructions: z.string().optional(),
     })
     .strict(),
@@ -244,6 +249,7 @@ export const BoardTaskSchema = z
     id: z.string().min(1),
     displayId: z.string().min(1),
     title: z.string().trim().min(1),
+    kind: BoardTaskKindSchema.default("task"),
     description: z.string().optional(),
     acceptanceCriteria: z.array(z.string().min(1)).optional(),
     status: BoardStatusSchema,
@@ -291,13 +297,13 @@ export function isTerminalStatus(status: BoardStatus): boolean {
 }
 
 export const BOARD_STATUS_LABELS: Record<BoardStatus, string> = {
-  planning: "规划",
+  planning: "待规划",
   todo: "待办",
   in_progress: "进行中",
   in_review: "待验收",
-  blocked: "阻塞",
-  done: "完成",
-  cancelled: "取消",
+  blocked: "已阻塞",
+  done: "已完成",
+  cancelled: "已取消",
 };
 
 export const BOARD_STATUS_COLORS: Record<BoardStatus, string> = {
@@ -311,11 +317,19 @@ export const BOARD_STATUS_COLORS: Record<BoardStatus, string> = {
 };
 
 export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
-  agent_error: "Agent 失败",
-  agent_silent: "Agent 无响应",
-  question: "Agent 提问",
-  permission: "等待权限",
-  agent_missing: "Agent 不存在",
-  human_required: "需要人工",
-  manual: "人工停止",
+  agent_error: "Agent 报错",
+  agent_silent: "Agent 停止未上报（可能已完成，打开对话确认或让它重新上报）",
+  question: "等待回答",
+  permission: "等待授权",
+  agent_missing: "会话已丢失",
+  human_required: "等待人工操作",
+  manual: "手动阻塞",
+};
+
+export const BOARD_PRIORITY_LABELS: Record<BoardPriority, string> = {
+  none: "无",
+  low: "低",
+  medium: "中",
+  high: "高",
+  urgent: "紧急",
 };

@@ -64,6 +64,7 @@ import { buildInitialMessage } from "./system-prompt";
 import { appendDeleted, appendEvent, type BoardStore } from "./store";
 import { rebuildFromPaseo } from "./agent-index";
 import type { AgentIndex } from "./agent-index";
+import { readAgentSummary, type AgentSummary } from "./inspection";
 import {
   legacyTasksPath,
   migrationsPath,
@@ -88,6 +89,7 @@ export interface ListInput {
   label?: string;
   query?: string;
   includeFinished: boolean;
+  hierarchyParentId?: string | null;
 }
 
 export type DeclareRequest =
@@ -108,6 +110,23 @@ export type DeclareRequest =
   | { kind: "waiting"; summary?: string }
   | { kind: "clear"; summary?: string }
   | { kind: "progress"; summary: string; stage?: string };
+
+export interface PaseoAgentProfile {
+  id: string;
+  name: string;
+  provider: string;
+  model?: string;
+  modeId?: string;
+  thinkingOptionId?: string;
+  options?: Record<string, unknown>;
+  notes?: string;
+  icon?: string;
+  color?: string;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
 
 export class TaskBoardService {
   private locks = new Map<string, Promise<unknown>>();
@@ -194,6 +213,12 @@ export class TaskBoardService {
       if (input.status && task.status !== input.status) return false;
       if (input.projectId && task.projectId !== input.projectId) return false;
       if (input.label && !task.labels.includes(input.label)) return false;
+      if (
+        input.hierarchyParentId !== undefined &&
+        task.hierarchyParentId !== input.hierarchyParentId
+      ) {
+        return false;
+      }
       if (query) {
         const haystack =
           `${task.displayId} ${task.title} ${task.description ?? ""}`.toLowerCase();
@@ -217,12 +242,14 @@ export class TaskBoardService {
 
   async create(input: {
     title: string;
+    kind?: BoardTask["kind"];
     description?: string;
     acceptanceCriteria?: string[];
     priority?: BoardTask["priority"];
     labels?: string[];
     projectId?: string | null;
     trigger?: Trigger;
+    status?: BoardStatus;
     hierarchyParentId?: string | null;
   }): Promise<BoardTask> {
     const now = new Date().toISOString();
@@ -243,7 +270,7 @@ export class TaskBoardService {
         document,
         {
           ...input,
-          status: input.trigger ? "todo" : "planning",
+          status: input.trigger ? "todo" : (input.status ?? "planning"),
           nextRunAt,
         },
         { id, now },
@@ -517,7 +544,9 @@ export class TaskBoardService {
         }
         const created =
           task.assignment.agent.kind === "create"
-            ? await createAgentForTask(paseo, task, task.assignment)
+            ? await createAgentForTask(paseo, task, task.assignment, {
+                planningPrompt: (await this.settings.read()).planningPrompt,
+              })
             : await executionForExistingAgent(paseo, task, task.assignment);
         agentId = created.execution.agentId;
         await this.index.bind(agentId, task.id);
@@ -732,6 +761,80 @@ export class TaskBoardService {
     return outcome;
   }
 
+  async sendMessage(
+    paseo: PaseoApi,
+    taskId: string,
+    message: string,
+    waitSeconds = 0,
+  ): Promise<{
+    task: BoardTask;
+    wait: Awaited<ReturnType<PaseoAgentHandle["waitForFinish"]>> | null;
+  }> {
+    const task = await this.get(taskId);
+    const agentId = task.execution?.agentId;
+    if (!agentId) {
+      throw new BoardError(
+        "E_NOT_ASSIGNED",
+        "This task has no bound agent to send a message to",
+        { taskId },
+      );
+    }
+    const handle = paseo.agents.ref(agentId);
+    const refreshed = await handle.refresh();
+    if (!refreshed || refreshed.agent.archivedAt) {
+      throw new BoardError("E_AGENT_MISSING", "The bound agent is missing", {
+        taskId,
+        agentId,
+      });
+    }
+    await handle.send(message);
+    const wait =
+      waitSeconds > 0 ? await handle.waitForFinish(waitSeconds * 1_000) : null;
+    return { task: await this.get(taskId), wait };
+  }
+
+  async waitForTask(
+    paseo: PaseoApi,
+    taskId: string,
+    until: ReadonlyArray<"review" | "blocked" | "idle">,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<{
+    reached: "review" | "blocked" | "idle" | null;
+    task: BoardTask;
+    agent: AgentSummary | null;
+  }> {
+    const deadline = Date.now() + timeoutMs;
+    let task = await this.get(taskId);
+    let agent: AgentSummary | null = null;
+    for (;;) {
+      task = await this.get(taskId);
+      agent = task.execution
+        ? await readAgentSummary(paseo, task.execution.agentId)
+        : null;
+      if (task.status === "in_review" && until.includes("review")) {
+        return { reached: "review", task, agent };
+      }
+      if (task.status === "blocked" && until.includes("blocked")) {
+        return { reached: "blocked", task, agent };
+      }
+      if (
+        until.includes("idle") &&
+        agent?.lifecycle === "idle" &&
+        !agent.activeTurn
+      ) {
+        return { reached: "idle", task, agent };
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || signal?.aborted) {
+        return { reached: null, task, agent };
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(1_500, remaining)),
+      );
+    }
+  }
+
   async candidates(paseo: PaseoApi, projectId?: string) {
     const [projects, workspaces, agents, providers] = await Promise.all([
       paseo.projects.list(),
@@ -745,6 +848,7 @@ export class TaskBoardService {
         label: entry.provider,
         available: entry.available,
       })) ?? [];
+    const profiles = await this.listProfiles(paseo);
 
     return {
       projects: projects.projects
@@ -787,6 +891,7 @@ export class TaskBoardService {
               })),
           };
         }),
+      profiles,
       providers: providerList,
     };
   }
@@ -838,6 +943,114 @@ export class TaskBoardService {
 
   async updateSettings(patch: Parameters<BoardSettingsStore["update"]>[0]) {
     return this.settings.update(patch);
+  }
+
+  async listProfiles(paseo: PaseoApi): Promise<PaseoAgentProfile[]> {
+    const { config } = await paseo.config.get();
+    const raw = config as unknown as {
+      agentProfiles?: unknown;
+      daemon?: { agentProfiles?: unknown };
+    };
+    const value = Array.isArray(raw.agentProfiles)
+      ? raw.agentProfiles
+      : Array.isArray(raw.daemon?.agentProfiles)
+        ? raw.daemon.agentProfiles
+        : [];
+    const profiles: PaseoAgentProfile[] = [];
+    for (const entry of value) {
+      if (!entry || typeof entry !== "object") continue;
+      const profile = entry as Record<string, unknown>;
+      if (
+        typeof profile.id !== "string" ||
+        typeof profile.name !== "string" ||
+        typeof profile.provider !== "string"
+      ) {
+        continue;
+      }
+      profiles.push({
+        id: profile.id,
+        name: profile.name,
+        provider: profile.provider,
+        model: optionalString(profile.model),
+        modeId: optionalString(profile.modeId),
+        thinkingOptionId: optionalString(profile.thinkingOptionId),
+        options:
+          profile.options &&
+          typeof profile.options === "object" &&
+          !Array.isArray(profile.options)
+            ? (profile.options as Record<string, unknown>)
+            : undefined,
+        notes: optionalString(profile.notes),
+        icon: optionalString(profile.icon),
+        color: optionalString(profile.color),
+      });
+    }
+    return profiles;
+  }
+
+  async providerOptions(
+    paseo: PaseoApi,
+    input: { provider: string; cwd?: string },
+  ) {
+    const provider = input.provider.trim();
+    if (!provider) {
+      throw new BoardError("E_VALIDATION_FAILED", "Provider is required");
+    }
+    const options = input.cwd ? { cwd: input.cwd } : undefined;
+    const errors: string[] = [];
+    let models: Array<{
+      id: string;
+      label: string;
+      description?: string;
+      isDefault: boolean;
+      defaultThinkingOptionId?: string;
+      thinkingOptions: Array<{
+        id: string;
+        label: string;
+        description?: string;
+        isDefault: boolean;
+      }>;
+    }> = [];
+    let modes: Array<{ id: string; label: string; description?: string }> = [];
+    try {
+      const result = await paseo.providers.listModels(provider, options);
+      if (result.error) errors.push(result.error);
+      models = (result.models ?? [])
+        .filter((model) => model.isSelectable !== false)
+        .map((model) => ({
+          id: model.id,
+          label: model.label,
+          description: model.description,
+          isDefault: model.isDefault ?? false,
+          defaultThinkingOptionId: model.defaultThinkingOptionId,
+          thinkingOptions: (model.thinkingOptions ?? []).map((option) => ({
+            id: option.id,
+            label: option.label,
+            description: option.description,
+            isDefault: option.isDefault ?? false,
+          })),
+        }));
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+    try {
+      const result = await paseo.providers.listModes(provider, options);
+      if (result.error) errors.push(result.error);
+      modes = (result.modes ?? []).map((mode) => ({
+        id: mode.id,
+        label: mode.label,
+        description: mode.description,
+      }));
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+    return {
+      provider,
+      cwd: input.cwd ?? null,
+      models,
+      modes,
+      error: errors.length > 0 ? [...new Set(errors)].join(" · ") : null,
+    };
   }
 
   async testNotification(webhookUrl?: string) {

@@ -1,12 +1,19 @@
 import type { BoardTask } from "../shared/core/board/types";
+import {
+  BUILTIN_PLANNING_PROMPT,
+  renderPlanningPrompt,
+} from "../shared/planning-prompt";
 
-export function buildBoardSystemPrompt(task: BoardTask): string {
+export function buildBoardSystemPrompt(
+  task: BoardTask,
+  options: { planningPrompt?: string } = {},
+): string {
   const acceptance =
     task.acceptanceCriteria && task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((item) => `- ${item}`).join("\n")
       : "- (none listed)";
 
-  return [
+  const base = [
     `You are the assigned agent for Paseo task board card ${task.displayId} (${task.id}).`,
     "",
     "Scope",
@@ -31,6 +38,11 @@ export function buildBoardSystemPrompt(task: BoardTask): string {
   ]
     .filter((line) => line !== "")
     .join("\n");
+  if (task.kind !== "task-planning") return base;
+  const template = options.planningPrompt?.trim()
+    ? options.planningPrompt
+    : BUILTIN_PLANNING_PROMPT;
+  return `${renderPlanningPrompt(template, task)}\n\n${base}`;
 }
 
 export function buildInitialMessage(

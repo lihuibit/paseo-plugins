@@ -116,3 +116,30 @@ export async function appendDeleted(event: BoardEvent): Promise<void> {
     );
   }
 }
+
+export async function readEvents(options: {
+  limit: number;
+  taskId?: string;
+  kind?: string;
+}): Promise<BoardEvent[]> {
+  let raw: string;
+  try {
+    raw = await readFile(eventsPath(), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const events: BoardEvent[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as BoardEvent;
+      if (options.taskId && parsed.taskId !== options.taskId) continue;
+      if (options.kind && parsed.kind !== options.kind) continue;
+      events.push(parsed);
+    } catch {
+      continue;
+    }
+  }
+  return events.slice(-options.limit);
+}

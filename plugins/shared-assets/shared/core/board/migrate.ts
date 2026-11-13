@@ -315,6 +315,7 @@ export function mapLegacyDocument(
       id: taskId,
       displayId,
       title: text(source.title) ?? legacyId,
+      kind: "task",
       description: text(source.description) ?? undefined,
       acceptanceCriteria: stringList(source.acceptanceCriteria),
       status,

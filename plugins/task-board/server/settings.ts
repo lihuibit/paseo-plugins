@@ -69,6 +69,10 @@ export class BoardSettingsStore {
               ? undefined
               : (validated.timezone ?? this.settings.timezone),
           wecom: { ...this.settings.wecom, ...validated.wecom },
+          planningPrompt:
+            validated.planningPrompt === null
+              ? ""
+              : (validated.planningPrompt ?? this.settings.planningPrompt),
         });
         await atomicWrite(settingsPath(), `${JSON.stringify(next, null, 2)}\n`);
         this.settings = next;

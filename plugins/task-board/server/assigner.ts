@@ -1,6 +1,7 @@
 import type { PaseoApi, PaseoAgentHandle } from "@getpaseo/client";
 import { BoardError } from "../shared/core/board/errors";
 import {
+  BOARD_ADMIN_LABEL,
   BOARD_KIND_LABEL,
   BOARD_LABEL,
   BOARD_METADATA_KEY,
@@ -82,6 +83,7 @@ export async function createAgentForTask(
   paseo: PaseoApi,
   task: BoardTask,
   assignment: BoardAssignment,
+  options: { planningPrompt?: string } = {},
 ): Promise<{ handle: PaseoAgentHandle; execution: BoardExecution }> {
   if (assignment.agent.kind !== "create") {
     throw new BoardError("E_VALIDATION_FAILED", "Expected a create target");
@@ -108,15 +110,13 @@ export async function createAgentForTask(
         provider,
         modeId: agentInput.modeId,
         thinkingOptionId: agentInput.thinkingOptionId,
-        systemPrompt: buildBoardSystemPrompt(task),
+        options: agentInput.options,
+        systemPrompt: buildBoardSystemPrompt(task, options),
       },
       title: agentInput.title ?? `${task.displayId} ${task.title}`,
-      labels: {
-        [BOARD_LABEL]: "1",
-        [BOARD_TASK_LABEL]: task.id,
-        [BOARD_KIND_LABEL]: "task",
-      },
+      labels: boardLabels(task),
       metadata: {
+        [BOARD_TASK_LABEL]: task.id,
         [BOARD_METADATA_KEY]: {
           taskId: task.id,
           displayId: task.displayId,
@@ -193,10 +193,13 @@ export async function executionForExistingAgent(
   };
 }
 
-export function boardLabels(taskId: string): Record<string, string> {
+export function boardLabels(
+  task: Pick<BoardTask, "id" | "kind">,
+): Record<string, string> {
   return {
     [BOARD_LABEL]: "1",
-    [BOARD_TASK_LABEL]: taskId,
-    [BOARD_KIND_LABEL]: "task",
+    [BOARD_TASK_LABEL]: task.id,
+    [BOARD_KIND_LABEL]: task.kind,
+    ...(task.kind === "task-planning" ? { [BOARD_ADMIN_LABEL]: "1" } : {}),
   };
 }

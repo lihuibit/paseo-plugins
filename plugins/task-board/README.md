@@ -60,7 +60,11 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 | 方法                             | 作用                                        |
 | -------------------------------- | ------------------------------------------- |
 | `task-board.list`                | 过滤列卡（状态/项目/标签/搜索）             |
+| `task-board.list-summary`        | 同 `board_list`：摘要 + total + counts      |
 | `task-board.get`                 | 单卡                                        |
+| `task-board.status`              | 卡片摘要 + Agent live + 最近活动            |
+| `task-board.logs`                | Agent timeline 尾部，支持过滤与截断         |
+| `task-board.events`              | 看板事件流                                  |
 | `task-board.create`              | 建卡，默认 `planning`                       |
 | `task-board.update`              | 编辑，带 `expectedRevision`                 |
 | `task-board.set-status`          | 人工流转，带 `expectedRevision`             |
@@ -70,16 +74,27 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 | `task-board.stop`                | 中断当前 turn，`blocked(manual)`            |
 | `task-board.cancel`              | 取消并归档 Agent，`cancelled` + `final`     |
 | `task-board.unassign`            | 清除执行体，回 `planning`                   |
+| `task-board.send`                | 给绑定 Agent 发消息，可等待 turn 完成       |
+| `task-board.wait`                | 等 review / blocked / idle                  |
+| `task-board.done`                | 管理面：把卡片置为 `done`                   |
 | `task-board.schedule`            | 设置/清除定时或 recurring                   |
 | `task-board.set-hierarchy`       | 设置父任务（拒绝自指与环）                  |
 | `task-board.hierarchy`           | 父任务、子任务列表与只读进度汇总            |
 | `task-board.delete`              | 删除卡片并审计                              |
 | `task-board.declare`             | 测试/内部声明入口（只接受绑定的 Agent）     |
 | `task-board.progress`            | 测试/内部进度入口                           |
+| `task-board.providers`           | Provider 目录，可附带单个 Provider 的模型   |
 | `task-board.settings.get/update` | 读取/更新 WeCom 通知设置                    |
 | `task-board.notifications.test`  | 发送测试消息并返回每次尝试                  |
 | `task-board.migrate-legacy`      | 只读导入 `$PASEO_HOME/tasks/tasks.json`     |
 | `task-board.health`              | 数据目录、绑定数、MCP 注入、调度器状态      |
+
+### 外部 CLI
+
+`paseo-board` 通过上述 RPC 从普通 shell 或外部 Agent 管理看板，不需要 MCP，
+调用方也不需要安装插件。安装、鉴权、命令、退出码与 Claude Code
+`Bash(paseo-board:*)` 示例见
+[`../../packages/board-cli/README.md`](../../packages/board-cli/README.md)。
 
 ## Agent 归属与 hooks
 
@@ -147,6 +162,43 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 
 工具只在 session open 时附加；修改后需要 `paseo plugin reload` 并让 Agent 重开会话。
 
+## 规划任务与 `board_*` 管理工具
+
+`kind=task-planning` 的卡片会创建一个规划 Agent。它默认带以下 label：
+
+```text
+agentstorm.board=1
+agentstorm.board-admin=1
+agentstorm.kind=task-planning
+agentstorm.task-id=<btask_id>
+```
+
+`agent.open.before` 按 label 注入工具：`agentstorm.board-admin=1` 的 Agent 获得全部
+`board_*` 管理工具，普通 worker 仍然只有 `board_declare`。
+
+| 类别 | 工具                                                                                                                                                             |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 只读 | `board_list` / `board_get` / `board_status` / `board_logs` / `board_events` / `board_profiles` / `board_providers`                                               |
+| 写   | `board_create` / `board_update` / `board_assign` / `board_start` / `board_stop` / `board_cancel` / `board_unassign` / `board_done` / `board_send` / `board_wait` |
+| 汇报 | `board_declare`                                                                                                                                                  |
+
+- `board_list` 支持 `status`、`parentId`，每张卡附带 Agent lifecycle 摘要。
+- `board_status` 返回 lifecycle、`modeId`、`pendingPermissions`、`activeTurn`、
+  `lastError`、`lastUsage`、`archivedAt` 和最近 5 条活动摘要。
+- `board_logs` 默认 20 条、最大 200，按 `text|tools|errors|permissions` 过滤；每条
+  截断 500 字符，跳过 reasoning，不内联图片。
+- `board_assign` 支持已有 Agent，也支持 `profileId` 或
+  `provider/model/modeId/thinkingOptionId` 新建 Agent。
+- `board_send` 的 `waitSeconds` 最大 300；`board_wait` 的 `timeoutMs` 最大 120000。
+
+### 规划提示词
+
+- 内置一份 G0–G5 提示词，要求：先读任务、G1/G2 请示、同一时间只跑一个子任务、
+  G4 自审与用户门禁、只在 G5 调用 `board_done`。
+- 提示词支持 `{{taskId}}` 插值，并且不引用任何外部 CLI。
+- `settings.json` 的 `planningPrompt` 为空时使用内置值；设置页可以编辑并「恢复默认」。
+- 覆盖值只影响新创建的会话，已有 Agent 需要重新分配或重开会话。
+
 ## 边界与已知偏差
 
 - Paseo 0.16 的 `PaseoApi` 没有公开 `cancelAgent`。`task-board.stop` 用
@@ -179,7 +231,9 @@ npm test --workspace plugins/task-board
 E2E_PROJECT_ID=<prj_id> E2E_WORKSPACE_ID=<wks_id> npm run e2e:task-board
 npm run e2e:i4
 npm run e2e:i4-migrate
+E2E_PASEO_HOME=~/.paseo-plugin-test E2E_PASEO_PORT=6769 npm run e2e:planning
 ```
 
 I2 / I4 的实测截图、日志与落盘快照在 AgentStorm 仓库
 `docs/plugins/evidence/implementation/I2/`、`.../I4/`。
+规划任务工具的独立 home 端到端记录在 `.../I6/`。

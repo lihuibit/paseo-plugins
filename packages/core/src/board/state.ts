@@ -10,6 +10,7 @@ import {
   type BoardStatus,
   type BoardPriority,
   type BoardTask,
+  type BoardTaskKind,
   type BoardTaskDocument,
   type Trigger,
   isTerminalStatus,
@@ -82,6 +83,7 @@ export function assertRevision(
 
 export interface CreateBoardTaskInput {
   title: string;
+  kind?: BoardTaskKind;
   description?: string;
   acceptanceCriteria?: string[];
   priority?: BoardPriority;
@@ -111,6 +113,7 @@ export function createBoardTask(
     id: meta.id,
     displayId: `TASK-${next.nextNumber}`,
     title: input.title,
+    kind: input.kind ?? "task",
     description: input.description,
     acceptanceCriteria: input.acceptanceCriteria,
     status: input.status ?? "planning",

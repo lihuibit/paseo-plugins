@@ -16,32 +16,52 @@ import {
   createRpc,
   declareRpc,
   deleteRpc,
+  doneRpc,
+  eventsRpc,
   getRpc,
   healthRpc,
   hierarchyRpc,
+  listSummaryRpc,
   listRpc,
+  logsRpc,
   migrateLegacyRpc,
   notificationsTestRpc,
+  profilesListRpc,
+  providerOptionsRpc,
+  providersRpc,
   progressRpc,
   scheduleRpc,
+  sendRpc,
   setHierarchyRpc,
   setStatusRpc,
   settingsGetRpc,
   settingsUpdateRpc,
   startRpc,
+  statusRpc,
   stopRpc,
   unassignRpc,
   updateRpc,
+  waitRpc,
 } from "./shared/contracts";
 import { AgentIndex } from "./server/agent-index";
-import { createBoardDeclareTool } from "./server/board-tool";
+import {
+  createBoardAdminTools,
+  createBoardDeclareTool,
+} from "./server/board-tools";
 import { registerHooks } from "./server/hooks";
+import {
+  describeActivity,
+  listAgentSummaries,
+  readAgentSummary,
+  readTaskLogs,
+  summarizeTask,
+} from "./server/inspection";
 import { ensureDataDir } from "./server/plugin-data";
 import { WeComNotifier } from "./server/notifier";
 import { Scheduler } from "./server/scheduler";
 import { BoardSettingsStore } from "./server/settings";
 import { TaskBoardService, type DeclareRequest } from "./server/service";
-import { BoardStore } from "./server/store";
+import { BoardStore, readEvents } from "./server/store";
 
 async function respond<T>(
   work: () => Promise<T>,
@@ -93,6 +113,7 @@ export default function contribute(server: PluginServerContext) {
   const service = new TaskBoardService(store, index, settings, notifier);
   const scheduler = new Scheduler(service);
   const declareTool = createBoardDeclareTool(service);
+  const adminTools = createBoardAdminTools(service);
   let ready: Promise<void> | null = null;
 
   void ensureDataDir()
@@ -126,9 +147,50 @@ export default function contribute(server: PluginServerContext) {
     await ensureReady(context.paseo);
     return respond(() => service.list(input));
   });
+  server.handle(listSummaryRpc, async (input, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => {
+      const { tasks, counts } = await service.list(input);
+      const agents = await listAgentSummaries(context.paseo);
+      const selected = tasks
+        .slice(0, input.limit)
+        .map((task) =>
+          summarizeTask(
+            task,
+            task.execution ? (agents[task.execution.agentId] ?? null) : null,
+          ),
+        );
+      return { tasks: selected, total: tasks.length, counts };
+    });
+  });
   server.handle(getRpc, async ({ taskId }, context) => {
     await ensureReady(context.paseo);
     return respond(async () => ({ task: await service.get(taskId) }));
+  });
+  server.handle(statusRpc, async ({ taskId, tail }, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => {
+      const task = await service.get(taskId);
+      const agent = task.execution
+        ? await readAgentSummary(context.paseo, task.execution.agentId)
+        : null;
+      return {
+        task: summarizeTask(task, agent),
+        agent,
+        recentActivity: task.activity.slice(-tail).map(describeActivity),
+      };
+    });
+  });
+  server.handle(logsRpc, async ({ taskId, limit, filter }, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => {
+      const task = await service.get(taskId);
+      return readTaskLogs(context.paseo, task, { limit, filter });
+    });
+  });
+  server.handle(eventsRpc, async (input, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => ({ events: await readEvents(input) }));
   });
   server.handle(createRpc, async (input, context) => {
     await ensureReady(context.paseo);
@@ -191,6 +253,35 @@ export default function contribute(server: PluginServerContext) {
       task: await service.start(context.paseo, taskId, message),
     }));
   });
+  server.handle(sendRpc, async ({ taskId, message, waitSeconds }, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => {
+      const result = await service.sendMessage(
+        context.paseo,
+        taskId,
+        message,
+        waitSeconds,
+      );
+      return {
+        task: summarizeTask(result.task, null),
+        wait: result.wait,
+      };
+    });
+  });
+  server.handle(waitRpc, async ({ taskId, until, timeoutMs }, context) => {
+    await ensureReady(context.paseo);
+    return respond(() =>
+      service.waitForTask(context.paseo, taskId, until, timeoutMs),
+    );
+  });
+  server.handle(doneRpc, async ({ taskId, expectedRevision }, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => {
+      const revision = expectedRevision ?? (await service.get(taskId)).revision;
+      const task = await service.setStatus(taskId, "done", revision);
+      return { task: summarizeTask(task, null) };
+    });
+  });
   server.handle(stopRpc, async ({ taskId }, context) => {
     await ensureReady(context.paseo);
     return respond(async () => ({
@@ -236,6 +327,39 @@ export default function contribute(server: PluginServerContext) {
     await ensureReady(context.paseo);
     return respond(() => service.candidates(context.paseo, projectId));
   });
+  server.handle(profilesListRpc, async (_input, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => ({
+      profiles: await service.listProfiles(context.paseo),
+    }));
+  });
+  server.handle(providerOptionsRpc, async (input, context) => {
+    await ensureReady(context.paseo);
+    return respond(() => service.providerOptions(context.paseo, input));
+  });
+  server.handle(providersRpc, async (input, context) => {
+    await ensureReady(context.paseo);
+    return respond(async () => {
+      const available = await context.paseo.providers
+        .listAvailable()
+        .catch(() => null);
+      return {
+        providers:
+          available?.providers.map((entry) => ({
+            provider: entry.provider,
+            available: entry.available,
+          })) ?? [],
+        ...(input.provider
+          ? {
+              catalog: await service.providerOptions(context.paseo, {
+                provider: input.provider,
+                cwd: input.cwd,
+              }),
+            }
+          : {}),
+      };
+    });
+  });
   server.handle(healthRpc, async (_input, context) => {
     await ensureReady(context.paseo);
     return respond(() => service.health(context.paseo, scheduler.status()));
@@ -259,7 +383,7 @@ export default function contribute(server: PluginServerContext) {
     return respond(() => service.migrateLegacy(context.paseo, input));
   });
 
-  registerHooks(server, service, declareTool, ensureReady);
+  registerHooks(server, service, declareTool, adminTools, ensureReady);
 
   return async () => {
     console.log("[agentstorm-task-board] server stopping");

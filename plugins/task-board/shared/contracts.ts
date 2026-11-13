@@ -3,15 +3,34 @@ import { z } from "zod";
 import { envelope } from "./core/board/errors";
 import {
   BoardAssignmentAgentSchema,
+  BoardDeclarationSchema,
   BoardPrioritySchema,
+  BoardProgressSchema,
   BoardStatusSchema,
   BoardTaskSchema,
+  BoardTaskKindSchema,
   TriggerSchema,
 } from "./core/board/types";
 import { BoardSettingsPatchSchema, BoardSettingsSchema } from "./settings";
 
 const IdSchema = z.string().min(1);
 const RevisionSchema = z.number().int().nonnegative();
+
+export const PaseoAgentProfileSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    provider: z.string().min(1),
+    model: z.string().min(1).optional(),
+    modeId: z.string().min(1).optional(),
+    thinkingOptionId: z.string().min(1).optional(),
+    options: z.record(z.string(), z.unknown()).optional(),
+    notes: z.string().optional(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+  })
+  .strict();
+export type PaseoAgentProfile = z.infer<typeof PaseoAgentProfileSchema>;
 
 export const CandidateWorkspaceSchema = z
   .object({
@@ -45,6 +64,7 @@ export const CandidateProjectSchema = z
 export const CandidatesResultSchema = z
   .object({
     projects: z.array(CandidateProjectSchema),
+    profiles: z.array(PaseoAgentProfileSchema),
     providers: z.array(
       z
         .object({
@@ -57,6 +77,50 @@ export const CandidatesResultSchema = z
   })
   .strict();
 export type CandidatesResult = z.infer<typeof CandidatesResultSchema>;
+
+export const ProviderModelSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().optional(),
+    isDefault: z.boolean(),
+    defaultThinkingOptionId: z.string().min(1).optional(),
+    thinkingOptions: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          label: z.string().min(1),
+          description: z.string().optional(),
+          isDefault: z.boolean(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export const ProviderModeSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().optional(),
+  })
+  .strict();
+
+export const ProviderOptionsResultSchema = z
+  .object({
+    provider: z.string().min(1),
+    cwd: z.string().min(1).nullable(),
+    models: z.array(ProviderModelSchema),
+    modes: z.array(ProviderModeSchema),
+    error: z.string().nullable(),
+  })
+  .strict();
+export type ProviderOptionsResult = z.infer<typeof ProviderOptionsResultSchema>;
+
+export const ProfilesResultSchema = z
+  .object({ profiles: z.array(PaseoAgentProfileSchema) })
+  .strict();
+export type ProfilesResult = z.infer<typeof ProfilesResultSchema>;
 
 export const HealthResultSchema = z
   .object({
@@ -86,6 +150,114 @@ export type HealthResult = z.infer<typeof HealthResultSchema>;
 
 export const emptyInput = z.object({}).strict();
 
+export const AgentSummarySchema = z
+  .object({
+    agentId: z.string().min(1),
+    title: z.string().nullable(),
+    lifecycle: z.string().min(1),
+    provider: z.string().min(1),
+    model: z.string().nullable(),
+    modeId: z.string().nullable(),
+    workspaceId: z.string().nullable(),
+    pendingPermissions: z.array(
+      z
+        .object({
+          requestId: z.string().min(1),
+          kind: z.string().min(1),
+          title: z.string().min(1),
+          description: z.string().optional(),
+        })
+        .strict(),
+    ),
+    activeTurn: z
+      .object({
+        turnId: z.string().min(1),
+        startedAt: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
+    lastError: z.string().nullable(),
+    lastUsage: z.unknown(),
+    archivedAt: z.string().nullable(),
+    background: z.boolean(),
+  })
+  .strict();
+export type AgentSummaryResult = z.infer<typeof AgentSummarySchema>;
+
+export const TaskSummarySchema = z
+  .object({
+    id: z.string().min(1),
+    displayId: z.string().min(1),
+    title: z.string().min(1),
+    kind: BoardTaskKindSchema,
+    status: BoardStatusSchema,
+    priority: BoardPrioritySchema,
+    labels: z.array(z.string().min(1)),
+    projectId: z.string().nullable(),
+    hierarchyParentId: z.string().nullable(),
+    parentTaskId: z.string().nullable(),
+    revision: RevisionSchema,
+    updatedAt: z.string().min(1),
+    blockReason: z.string().nullable(),
+    blockDetail: z.string().nullable(),
+    progress: BoardProgressSchema.nullable(),
+    declaration: BoardDeclarationSchema.nullable(),
+    execution: z
+      .object({
+        agentId: z.string().min(1),
+        agentTitle: z.string().nullable(),
+        provider: z.string().min(1),
+        model: z.string().nullable(),
+        lastLifecycle: z.string().nullable(),
+        startedAt: z.string().min(1),
+      })
+      .strict()
+      .nullable(),
+    agent: AgentSummarySchema.nullable(),
+  })
+  .strict();
+export type TaskSummaryResult = z.infer<typeof TaskSummarySchema>;
+
+export const LogEntrySchema = z
+  .object({
+    at: z.string().min(1),
+    kind: z.enum(["assistant", "user", "tool", "error", "permission"]),
+    text: z.string().optional(),
+    name: z.string().optional(),
+    status: z.string().optional(),
+    error: z.string().optional(),
+    requestId: z.string().optional(),
+  })
+  .strict();
+
+export const logFilterSchema = z
+  .enum(["all", "text", "tools", "errors", "permissions"])
+  .default("all");
+
+export const listSummaryRpc = defineRpc({
+  name: "task-board.list-summary",
+  input: z
+    .object({
+      status: BoardStatusSchema.optional(),
+      projectId: IdSchema.optional(),
+      label: z.string().min(1).optional(),
+      query: z.string().optional(),
+      hierarchyParentId: IdSchema.nullable().optional(),
+      includeFinished: z.boolean().default(true),
+      limit: z.number().int().min(1).max(200).default(50),
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        tasks: z.array(TaskSummarySchema),
+        total: z.number().int().nonnegative(),
+        counts: z.record(z.string(), z.number()),
+      })
+      .strict(),
+  ),
+});
+
 export const listRpc = defineRpc({
   name: "task-board.list",
   input: z
@@ -94,6 +266,7 @@ export const listRpc = defineRpc({
       projectId: IdSchema.optional(),
       label: z.string().min(1).optional(),
       query: z.string().optional(),
+      hierarchyParentId: IdSchema.nullable().optional(),
       includeFinished: z.boolean().default(true),
     })
     .strict(),
@@ -178,6 +351,8 @@ export const createRpc = defineRpc({
       labels: z.array(z.string().trim().min(1)).optional(),
       projectId: IdSchema.nullable().optional(),
       trigger: TriggerSchema.optional(),
+      status: BoardStatusSchema.optional(),
+      kind: BoardTaskKindSchema.optional(),
       hierarchyParentId: IdSchema.nullable().optional(),
       clientRequestId: z.string().min(1).optional(),
     })
@@ -348,6 +523,179 @@ export const candidatesRpc = defineRpc({
   name: "task-board.candidates",
   input: z.object({ projectId: IdSchema.optional() }).strict(),
   output: envelope(CandidatesResultSchema),
+});
+
+export const profilesListRpc = defineRpc({
+  name: "task-board.profiles.list",
+  input: emptyInput,
+  output: envelope(ProfilesResultSchema),
+});
+
+export const providerOptionsRpc = defineRpc({
+  name: "task-board.provider-options",
+  input: z
+    .object({
+      provider: z.string().trim().min(1),
+      cwd: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+  output: envelope(ProviderOptionsResultSchema),
+});
+
+export const providersRpc = defineRpc({
+  name: "task-board.providers",
+  input: z
+    .object({
+      provider: z.string().trim().min(1).optional(),
+      cwd: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        providers: z.array(
+          z
+            .object({
+              provider: z.string().min(1),
+              available: z.boolean(),
+            })
+            .strict(),
+        ),
+        catalog: ProviderOptionsResultSchema.optional(),
+      })
+      .strict(),
+  ),
+});
+
+export const statusRpc = defineRpc({
+  name: "task-board.status",
+  input: z
+    .object({
+      taskId: IdSchema,
+      tail: z.number().int().min(1).max(20).default(5),
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        task: TaskSummarySchema,
+        agent: AgentSummarySchema.nullable(),
+        recentActivity: z.array(z.string()),
+      })
+      .strict(),
+  ),
+});
+
+export const logsRpc = defineRpc({
+  name: "task-board.logs",
+  input: z
+    .object({
+      taskId: IdSchema,
+      limit: z.number().int().min(1).max(200).default(20),
+      filter: logFilterSchema,
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        taskId: z.string().min(1),
+        agentId: z.string().min(1),
+        filter: z.enum(["all", "text", "tools", "errors", "permissions"]),
+        entries: z.array(LogEntrySchema),
+        hasOlder: z.boolean(),
+        error: z.string().nullable(),
+      })
+      .strict(),
+  ),
+});
+
+export const eventsRpc = defineRpc({
+  name: "task-board.events",
+  input: z
+    .object({
+      taskId: IdSchema.optional(),
+      kind: z.string().trim().min(1).optional(),
+      limit: z.number().int().min(1).max(500).default(50),
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        events: z.array(
+          z
+            .object({
+              at: z.string().min(1),
+              kind: z.string().min(1),
+              taskId: z.string().min(1).optional(),
+              detail: z.record(z.string(), z.unknown()).optional(),
+            })
+            .strict(),
+        ),
+      })
+      .strict(),
+  ),
+});
+
+export const WaitForFinishResultSchema = z
+  .object({
+    status: z.enum(["idle", "error", "permission", "timeout"]),
+    final: z.unknown().nullable(),
+    error: z.string().nullable(),
+    lastMessage: z.string().nullable(),
+  })
+  .strict();
+
+export const sendRpc = defineRpc({
+  name: "task-board.send",
+  input: z
+    .object({
+      taskId: IdSchema,
+      message: z.string().trim().min(1),
+      waitSeconds: z.number().int().min(0).max(300).default(0),
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        task: TaskSummarySchema,
+        wait: WaitForFinishResultSchema.nullable(),
+      })
+      .strict(),
+  ),
+});
+
+export const waitRpc = defineRpc({
+  name: "task-board.wait",
+  input: z
+    .object({
+      taskId: IdSchema,
+      until: z
+        .array(z.enum(["review", "blocked", "idle"]))
+        .min(1)
+        .default(["review", "blocked"]),
+      timeoutMs: z.number().int().min(1_000).max(120_000).default(60_000),
+    })
+    .strict(),
+  output: envelope(
+    z
+      .object({
+        reached: z.enum(["review", "blocked", "idle"]).nullable(),
+        task: BoardTaskSchema,
+        agent: AgentSummarySchema.nullable(),
+      })
+      .strict(),
+  ),
+});
+
+export const doneRpc = defineRpc({
+  name: "task-board.done",
+  input: z
+    .object({
+      taskId: IdSchema,
+      expectedRevision: RevisionSchema.optional(),
+    })
+    .strict(),
+  output: envelope(z.object({ task: TaskSummarySchema }).strict()),
 });
 
 export const settingsGetRpc = defineRpc({
