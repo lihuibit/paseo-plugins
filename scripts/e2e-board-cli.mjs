@@ -125,6 +125,7 @@ let finished = false;
 
 try {
   const listing = await runJson(["list"]);
+  report.assertions.exitCodes = { success: 0 };
   assert(Array.isArray(listing.parsed.tasks), "list returns tasks[]");
   step("list", { count: listing.parsed.tasks.length });
 
@@ -279,11 +280,12 @@ try {
   finished = true;
   step("done", { status: completed.parsed.task.status });
 
-  await expectFailure(
+  const notFound = await expectFailure(
     ["show", "TASK-999999"],
     1,
     /Task not found: TASK-999999/,
   );
+  report.assertions.exitCodes.notFound = notFound.code;
   step("error:task-not-found");
 
   if (process.env.E2E_SKIP_AUTH_TEST !== "1") {
@@ -294,12 +296,23 @@ try {
     step("error:bad-password");
   }
 
-  await expectFailure(["list"], 3, /Cannot connect to Paseo daemon/, {
-    PASEO_BOARD_URL: "http://127.0.0.1:1",
-  });
+  const connect = await expectFailure(
+    ["list"],
+    3,
+    /Cannot connect to Paseo daemon/,
+    {
+      PASEO_BOARD_URL: "http://127.0.0.1:1",
+    },
+  );
+  report.assertions.exitCodes.connect = connect.code;
   step("error:connect");
 
-  await expectFailure(["list", "--bogus"], 2, /Unknown option: --bogus/);
+  const usage = await expectFailure(
+    ["list", "--bogus"],
+    2,
+    /Unknown option: --bogus/,
+  );
+  report.assertions.exitCodes.usage = usage.code;
   step("error:usage");
 
   report.ok = true;
