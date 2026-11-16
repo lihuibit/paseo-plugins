@@ -1,6 +1,6 @@
 {
   "id": "agentstorm-shared-assets",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "name": "Shared Assets",
   "description": "Team Git-backed skills, AGENTS.md, knowledge and docs for Paseo projects.",
   "requirements": {
