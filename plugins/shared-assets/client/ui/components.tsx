@@ -247,6 +247,7 @@ export function Checkbox({
   tokens,
   testID,
   accessibilityLabel,
+  size = 16,
 }: {
   checked: boolean;
   onPress: () => void;
@@ -254,6 +255,7 @@ export function Checkbox({
   tokens: Tokens;
   testID?: string;
   accessibilityLabel?: string;
+  size?: number;
 }) {
   return (
     <Pressable
@@ -264,8 +266,8 @@ export function Checkbox({
       disabled={disabled}
       onPress={onPress}
       style={{
-        width: 22,
-        height: 22,
+        width: size + 6,
+        height: size + 6,
         alignItems: "center",
         justifyContent: "center",
         opacity: disabled ? 0.4 : 1,
@@ -273,8 +275,8 @@ export function Checkbox({
     >
       <View
         style={{
-          width: 16,
-          height: 16,
+          width: size,
+          height: size,
           borderRadius: 3,
           borderWidth: 1,
           borderColor: checked

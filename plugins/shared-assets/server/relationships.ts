@@ -1,12 +1,14 @@
 import { lstat, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PluginError } from "../shared/core/errors";
+import { parseDocAssetId, parseKnowledgeAssetId } from "../shared/core/paths";
 import { parseSkillFrontmatter } from "../shared/core/skill-markdown";
 import { SKILL_ROOTS } from "../shared/core/providers";
 import type {
   AssetKind,
   AssetRelationship,
   AssetRelationshipRow,
+  AssetReadResult,
   AssetSummary,
   DriftItem,
   LocalAssetSummary,
@@ -36,7 +38,13 @@ import {
 import { readDriftIgnores } from "./ignore";
 import { repoDir } from "./plugin-data";
 import { readConfig, requireBinding, writeConfig } from "./registry";
-import { scanAllAssets, scanDocs, scanKnowledge, scanPrompt } from "./repo";
+import {
+  readFileAsAsset,
+  scanAllAssets,
+  scanDocs,
+  scanKnowledge,
+  scanPrompt,
+} from "./repo";
 import { listDrift } from "./drift";
 
 async function localFileSummary(
@@ -177,6 +185,27 @@ function sharedForKind(
   return assets.filter((asset) => asset.kind === kind);
 }
 
+function tombstoneAsset(input: {
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  path: string;
+  description: string | null;
+}): AssetSummary {
+  return {
+    assetId: input.assetId,
+    kind: input.kind,
+    name: input.name,
+    scope: "project",
+    description: input.description,
+    path: input.path,
+    fileCount: 0,
+    totalBytes: 0,
+    files: [],
+    warnings: [],
+  };
+}
+
 function driftKey(assetId: string, provider: ProviderId | null): string {
   return `${assetId}\u0000${provider ?? ""}`;
 }
@@ -203,11 +232,14 @@ function rowFor(input: {
   local: LocalAssetSummary | null;
   linked: boolean;
   drift: DriftItem | null;
+  conflict?: boolean;
 }): AssetRelationshipRow {
   const assetId = input.shared?.assetId ?? input.local?.assetId ?? "unknown";
   return {
     id: `${assetId}\u0000${input.local?.assetId ?? ""}`,
-    relationship: relationship(input.shared, input.local, input.linked),
+    relationship: input.conflict
+      ? "conflict"
+      : relationship(input.shared, input.local, input.linked),
     shared: input.shared,
     local: input.local,
     syncStatus: input.drift?.status ?? null,
@@ -242,14 +274,30 @@ export async function listRelationships(input: {
     const records = (config.skills[input.projectId] ?? []).filter(
       (record) => record.provider === provider,
     );
+    const tombstones = records
+      .filter(
+        (record) =>
+          !sharedSkills.some((asset) => asset.assetId === record.assetId),
+      )
+      .map((record) => {
+        const local = locals.find((asset) => asset.name === record.name);
+        return tombstoneAsset({
+          assetId: record.assetId,
+          kind: "skill",
+          name: record.name,
+          path: `skills/project/${record.name}`,
+          description: local?.description ?? null,
+        });
+      });
+    const pool = [...sharedSkills, ...tombstones];
     const names = [
       ...new Set([
-        ...sharedSkills.map((asset) => asset.name),
+        ...pool.map((asset) => asset.name),
         ...locals.map((asset) => asset.name),
       ]),
     ].sort();
     for (const name of names) {
-      const shared = sharedSkills.find((asset) => asset.name === name) ?? null;
+      const shared = pool.find((asset) => asset.name === name) ?? null;
       const local = locals.find((asset) => asset.name === name) ?? null;
       const record = shared
         ? records.find(
@@ -259,11 +307,21 @@ export async function listRelationships(input: {
               entry.targetPath.startsWith(input.workspaceDirectory),
           )
         : undefined;
+      const occupied =
+        shared && local
+          ? records.find(
+              (entry) =>
+                entry.provider === provider &&
+                entry.targetPath === local.path &&
+                entry.assetId !== shared.assetId,
+            )
+          : undefined;
       rows.push(
         rowFor({
           shared,
           local,
           linked: record !== undefined,
+          conflict: occupied !== undefined,
           drift: shared
             ? (driftItems.get(driftKey(shared.assetId, provider)) ?? null)
             : null,
@@ -281,13 +339,25 @@ export async function listRelationships(input: {
     const hasBaseline = Object.values(baselines.entries).some(
       (entry) => entry.assetId === "prompt",
     );
+    const linked =
+      (stored?.canonical !== null && stored?.canonical !== undefined) ||
+      hasBaseline;
+    const sharedAsset =
+      shared ??
+      (linked
+        ? tombstoneAsset({
+            assetId: "prompt",
+            kind: "prompt",
+            name: "AGENTS.md",
+            path: "AGENTS.md",
+            description: null,
+          })
+        : null);
     rows.push(
       rowFor({
-        shared,
+        shared: sharedAsset,
         local,
-        linked:
-          (stored?.canonical !== null && stored?.canonical !== undefined) ||
-          hasBaseline,
+        linked,
         drift: driftItems.get(driftKey("prompt", null)) ?? null,
       }),
     );
@@ -298,14 +368,39 @@ export async function listRelationships(input: {
     );
     const locals = await localKnowledge(input.workspaceDirectory);
     const baselines = await readBaselines(input.workspaceDirectory);
+    const tombstones = [
+      ...new Map(
+        Object.values(baselines.entries)
+          .filter(
+            (entry) =>
+              entry.kind === "knowledge" &&
+              !sharedAssets.some((asset) => asset.assetId === entry.assetId) &&
+              parseKnowledgeAssetId(entry.assetId) !== null,
+          )
+          .map((entry) => {
+            const name = parseKnowledgeAssetId(entry.assetId)!;
+            return [
+              entry.assetId,
+              tombstoneAsset({
+                assetId: entry.assetId,
+                kind: "knowledge",
+                name,
+                path: `knowledge/${name}.md`,
+                description: null,
+              }),
+            ] as const;
+          }),
+      ).values(),
+    ];
+    const pool = [...sharedAssets, ...tombstones];
     const names = [
       ...new Set([
-        ...sharedAssets.map((asset) => asset.name),
+        ...pool.map((asset) => asset.name),
         ...locals.map((asset) => asset.name),
       ]),
     ].sort();
     for (const name of names) {
-      const shared = sharedAssets.find((asset) => asset.name === name) ?? null;
+      const shared = pool.find((asset) => asset.name === name) ?? null;
       const local = locals.find((asset) => asset.name === name) ?? null;
       const assetId = shared?.assetId ?? `knowledge/${name}.md`;
       const linked =
@@ -324,14 +419,39 @@ export async function listRelationships(input: {
     const sharedAssets = sharedForKind(await scanDocs(checkout), "doc");
     const locals = await localDocs(input.workspaceDirectory);
     const baselines = await readBaselines(input.workspaceDirectory);
+    const tombstones = [
+      ...new Map(
+        Object.values(baselines.entries)
+          .filter(
+            (entry) =>
+              entry.kind === "doc" &&
+              !sharedAssets.some((asset) => asset.assetId === entry.assetId) &&
+              parseDocAssetId(entry.assetId) !== null,
+          )
+          .map((entry) => {
+            const name = parseDocAssetId(entry.assetId)!;
+            return [
+              entry.assetId,
+              tombstoneAsset({
+                assetId: entry.assetId,
+                kind: "doc",
+                name,
+                path: `docs/${name}`,
+                description: null,
+              }),
+            ] as const;
+          }),
+      ).values(),
+    ];
+    const pool = [...sharedAssets, ...tombstones];
     const names = [
       ...new Set([
-        ...sharedAssets.map((asset) => asset.name),
+        ...pool.map((asset) => asset.name),
         ...locals.map((asset) => asset.name),
       ]),
     ].sort();
     for (const name of names) {
-      const shared = sharedAssets.find((asset) => asset.name === name) ?? null;
+      const shared = pool.find((asset) => asset.name === name) ?? null;
       const local = locals.find((asset) => asset.name === name) ?? null;
       const assetId = `doc/${name}`;
       const linked = Object.values(baselines.entries).some(
@@ -393,6 +513,73 @@ async function recordSharedBaseline(input: {
   });
 }
 
+export async function readLocalAsset(input: {
+  workspaceDirectory: string;
+  kind: AssetKind;
+  provider: ProviderId | null;
+  localAssetId: string;
+  path?: string;
+}): Promise<AssetReadResult> {
+  const workspace = input.workspaceDirectory;
+  let localRoot: string;
+  let relativePath: string;
+
+  if (input.kind === "prompt") {
+    localRoot = join(workspace, ".agentstorm");
+    relativePath = "AGENTS.md";
+  } else if (input.kind === "knowledge") {
+    const name = /^local:knowledge\/([^/]+)$/.exec(input.localAssetId)?.[1];
+    if (!name) {
+      throw new PluginError(
+        "E_ASSET_NOT_FOUND",
+        `Unknown local knowledge asset: ${input.localAssetId}`,
+      );
+    }
+    localRoot = join(workspace, ".agentstorm", "knowledge");
+    relativePath = `${name}.md`;
+  } else if (input.kind === "doc") {
+    const name = parseDocAssetId(input.localAssetId.replace(/^local:/, ""));
+    if (!name) {
+      throw new PluginError(
+        "E_ASSET_NOT_FOUND",
+        `Unknown local document asset: ${input.localAssetId}`,
+      );
+    }
+    localRoot = join(workspace, ".agentstorm", "docs", name);
+    relativePath = input.path ?? (await firstFile(localRoot));
+  } else {
+    const match = /^local-skill:([^/]+)\/([^/]+)$/.exec(input.localAssetId);
+    const provider = (input.provider ?? match?.[1] ?? "codex") as ProviderId;
+    const name = match?.[2];
+    const skillRoot = SKILL_ROOTS[provider];
+    if (!name || !skillRoot) {
+      throw new PluginError(
+        "E_ASSET_NOT_FOUND",
+        `Unknown local Skill asset: ${input.localAssetId}`,
+      );
+    }
+    localRoot = join(workspace, skillRoot, name);
+    relativePath = input.path ?? (await firstFile(localRoot));
+  }
+
+  const absolute = await resolveInside(
+    workspace,
+    join(localRoot, relativePath),
+  );
+  return await readFileAsAsset(input.localAssetId, relativePath, absolute);
+}
+
+async function firstFile(root: string): Promise<string> {
+  const files = await scanFiles(root).catch(() => []);
+  if (files.length === 0) {
+    throw new PluginError(
+      "E_ASSET_NOT_FOUND",
+      `No files found in local asset: ${root}`,
+    );
+  }
+  return files.find((file) => file.path === "SKILL.md")?.path ?? files[0]!.path;
+}
+
 export async function adoptRelationship(input: {
   projectId: string;
   workspaceDirectory: string;
@@ -421,6 +608,12 @@ export async function adoptRelationship(input: {
   }
   if (row.relationship === "linked") {
     return { assetId: input.assetId, mode: input.mode };
+  }
+  if (row.relationship === "conflict") {
+    throw new PluginError(
+      "E_VALIDATION_FAILED",
+      "This local asset is already associated with a different shared asset",
+    );
   }
   if (row.shared.name !== row.local.name) {
     throw new PluginError(

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -142,6 +142,33 @@ describe("association lifecycle", () => {
     expect(existsSync(join(workspace, ".codex/skills/review/SKILL.md"))).toBe(
       true,
     );
+  });
+
+  it("keeps a linked row visible when the shared asset was deleted", async () => {
+    await mkdir(join(workspace, ".codex/skills/review"), { recursive: true });
+    await writeFile(join(workspace, ".codex/skills/review/SKILL.md"), SKILL);
+    await adoptRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "skill",
+      provider: "codex",
+      assetId: "skill:project/review",
+      localAssetId: "local-skill:codex/review",
+      mode: "preserve-local",
+    });
+    await rm(join(repoDir("p1"), "skills/project/review"), {
+      recursive: true,
+      force: true,
+    });
+    const result = await listRelationships({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "skill",
+      provider: "codex",
+    });
+    expect(result.rows[0]?.relationship).toBe("linked");
+    expect(result.rows[0]?.syncStatus).toBe("remote-deleted");
+    expect(result.rows[0]?.shared?.assetId).toBe("skill:project/review");
   });
 
   it("adopts with the shared version and deletes the local copy on unlink", async () => {

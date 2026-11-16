@@ -39,6 +39,7 @@ import {
   relationshipsAdoptRpc,
   relationshipsBatchUnlinkRpc,
   relationshipsListRpc,
+  relationshipsReadLocalRpc,
   relationshipsUnlinkRpc,
   skillsListRpc,
   skillsSetEnabledRpc,
@@ -106,6 +107,7 @@ import { clearBaselines } from "./baseline";
 import {
   adoptRelationship,
   listRelationships,
+  readLocalAsset,
   unlinkRelationship,
 } from "./relationships";
 
@@ -671,6 +673,24 @@ export function registerHandlers(server: PluginServerContext): void {
         workspaceDirectory: workspace,
         kind: input.kind,
         provider: (input.provider ?? null) as ProviderId | null,
+      });
+    }),
+  );
+
+  server.handle(relationshipsReadLocalRpc, async (input, context) =>
+    respond(async () => {
+      await requireBinding(input.projectId);
+      const workspace = await workspaceDirectory(
+        context.paseo,
+        input.projectId,
+        input.workspaceId,
+      );
+      return readLocalAsset({
+        workspaceDirectory: workspace,
+        kind: input.kind,
+        provider: (input.provider ?? null) as ProviderId | null,
+        localAssetId: input.localAssetId,
+        path: input.path,
       });
     }),
   );

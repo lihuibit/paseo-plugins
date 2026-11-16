@@ -368,12 +368,21 @@ export async function readAsset(
     throw new PluginError("E_ASSET_NOT_FOUND", `Unknown asset: ${assetId}`);
   }
 
-  const info = await lstat(target.absolutePath).catch(() => null);
+  return await readFileAsAsset(
+    assetId,
+    target.repositoryPath,
+    target.absolutePath,
+  );
+}
+
+export async function readFileAsAsset(
+  assetId: string,
+  path: string,
+  absolutePath: string,
+): Promise<AssetReadResult> {
+  const info = await lstat(absolutePath).catch(() => null);
   if (!info?.isFile() || info.isSymbolicLink()) {
-    throw new PluginError(
-      "E_ASSET_NOT_FOUND",
-      `Asset file not found: ${target.repositoryPath}`,
-    );
+    throw new PluginError("E_ASSET_NOT_FOUND", `Asset file not found: ${path}`);
   }
   if (info.size > MAX_FILE_BYTES) {
     throw new PluginError(
@@ -382,13 +391,13 @@ export async function readAsset(
     );
   }
 
-  const extension = target.repositoryPath.split(".").pop()?.toLowerCase() ?? "";
+  const extension = path.split(".").pop()?.toLowerCase() ?? "";
   const mime = IMAGE_MIMES[extension] ?? null;
   if (mime && info.size <= IMAGE_LIMIT) {
-    const buffer = await readFile(target.absolutePath);
+    const buffer = await readFile(absolutePath);
     return {
       assetId,
-      path: target.repositoryPath,
+      path,
       kind: "image",
       mimeType: mime,
       content: null,
@@ -398,12 +407,12 @@ export async function readAsset(
     };
   }
 
-  const buffer = await readFile(target.absolutePath);
+  const buffer = await readFile(absolutePath);
   const head = buffer.subarray(0, Math.min(buffer.length, 8192));
   if (head.includes(0)) {
     return {
       assetId,
-      path: target.repositoryPath,
+      path,
       kind: "binary",
       mimeType: mime,
       content: null,
@@ -415,7 +424,7 @@ export async function readAsset(
   const truncated = buffer.length > TEXT_LIMIT;
   return {
     assetId,
-    path: target.repositoryPath,
+    path,
     kind: "text",
     mimeType: "text/plain",
     content: buffer.subarray(0, TEXT_LIMIT).toString("utf8"),

@@ -1,18 +1,34 @@
 import { lstat, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { PluginError } from "../shared/core/errors";
 import { unifiedDiff } from "../shared/core/diff";
+import {
+  parseDocAssetId,
+  parseKnowledgeAssetId,
+  parseSkillAssetId,
+} from "../shared/core/paths";
+import { isProviderId, SKILL_ROOTS } from "../shared/core/providers";
 import type {
+  AssetKind,
+  AssetSummary,
   BatchPublishItemPreview,
   BatchPublishItemResult,
   BatchPublishPreview,
   BatchPublishResult,
 } from "../shared/core/types";
 import { resolveState } from "./asset-state";
-import { atomicWriteFile } from "./fs-utils";
+import {
+  atomicWriteFile,
+  fileExists,
+  readFileLimited,
+  resolveInside,
+  scanFiles,
+} from "./fs-utils";
 import { assertGitIdentity, headRevision, runGit } from "./git";
 import { readSharedIgnoreRules, isRuleIgnored } from "./ignore";
 import { repoDir } from "./plugin-data";
-import { validatePublishContent } from "./validation";
+import { resolveAsset, scanPrompt } from "./repo";
+import { validatePublishContent, validatePublishPath } from "./validation";
 
 const PUSH_HINT =
   "Commit created locally. Push manually with git push; this plugin never pushes automatically.";
@@ -21,12 +37,325 @@ export interface BatchSelection {
   assetId: string;
   path?: string;
   provider?: string;
+  create?: boolean;
+  kind?: AssetKind;
 }
 
 interface BatchInput {
   projectId: string;
   workspaceDirectory: string;
   items: BatchSelection[];
+}
+
+interface CreationFile {
+  relativePath: string;
+  repositoryPath: string;
+  absolutePath: string;
+  size: number;
+  text: string | null;
+  buffer: Buffer;
+}
+
+interface CreationPlan {
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  targetPath: string;
+  files: CreationFile[];
+  asset: AssetSummary;
+}
+
+function pseudoAsset(input: {
+  assetId: string;
+  kind: AssetKind;
+  name: string;
+  repositoryRoot: string;
+  files: Array<{ path: string; size: number }>;
+}): AssetSummary {
+  return {
+    assetId: input.assetId,
+    kind: input.kind,
+    name: input.name,
+    scope: "project",
+    description: null,
+    path: input.repositoryRoot,
+    fileCount: input.files.length,
+    totalBytes: input.files.reduce((sum, file) => sum + file.size, 0),
+    files: input.files,
+    warnings: [],
+  };
+}
+
+async function readCreationFile(input: {
+  localPath: string;
+  relativePath: string;
+  repositoryPath: string;
+  asset: AssetSummary;
+}): Promise<CreationFile> {
+  const buffer = await readFileLimited(input.localPath);
+  const binary = buffer.subarray(0, 8192).includes(0);
+  const text = binary ? null : buffer.toString("utf8");
+  validatePublishPath(input.repositoryPath);
+  if (text !== null) {
+    validatePublishContent(input.asset, input.repositoryPath, text);
+  }
+  return {
+    relativePath: input.relativePath,
+    repositoryPath: input.repositoryPath,
+    absolutePath: input.localPath,
+    size: buffer.length,
+    text,
+    buffer,
+  };
+}
+
+async function creationPlan(input: {
+  selection: BatchSelection;
+  workspaceDirectory: string;
+  checkout: string;
+}): Promise<CreationPlan> {
+  const kind = input.selection.kind;
+  if (!kind) {
+    throw new PluginError(
+      "E_VALIDATION_FAILED",
+      "A local asset needs a kind before it can be published",
+    );
+  }
+  if (kind === "prompt") {
+    if (await scanPrompt(input.checkout)) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        "The shared repository already has AGENTS.md",
+      );
+    }
+    const localRoot = join(input.workspaceDirectory, ".agentstorm");
+    const localPath = join(localRoot, "AGENTS.md");
+    if (!(await fileExists(localPath))) {
+      throw new PluginError(
+        "E_ASSET_NOT_FOUND",
+        "The project has no .agentstorm/AGENTS.md to publish",
+      );
+    }
+    const asset = pseudoAsset({
+      assetId: "prompt",
+      kind,
+      name: "AGENTS.md",
+      repositoryRoot: "AGENTS.md",
+      files: [{ path: "AGENTS.md", size: 0 }],
+    });
+    const file = await readCreationFile({
+      localPath,
+      relativePath: "AGENTS.md",
+      repositoryPath: "AGENTS.md",
+      asset,
+    });
+    return {
+      assetId: "prompt",
+      kind,
+      name: "AGENTS.md",
+      targetPath: localPath,
+      files: [file],
+      asset,
+    };
+  }
+
+  if (kind === "skill") {
+    const parsed = parseSkillAssetId(input.selection.assetId);
+    if (!parsed) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        `Invalid Skill asset id: ${input.selection.assetId}`,
+      );
+    }
+    if (await resolveAsset(input.checkout, input.selection.assetId)) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        "The shared repository already has this Skill",
+      );
+    }
+    const provider = input.selection.provider ?? "codex";
+    if (!isProviderId(provider)) {
+      throw new PluginError(
+        "E_PROVIDER_UNSUPPORTED",
+        `Unknown provider: ${provider}`,
+      );
+    }
+    const skillRoot = SKILL_ROOTS[provider];
+    if (!skillRoot) {
+      throw new PluginError(
+        "E_PROVIDER_UNSUPPORTED",
+        `Provider ${provider} has no project Skill directory`,
+      );
+    }
+    const localRoot = join(input.workspaceDirectory, skillRoot, parsed.name);
+    await resolveInside(input.workspaceDirectory, localRoot);
+    const scanned = await scanFiles(localRoot);
+    if (scanned.length === 0) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        `Skill has no files to publish: ${parsed.name}`,
+      );
+    }
+    const repositoryRootPath = `skills/project/${parsed.name}`;
+    const asset = pseudoAsset({
+      assetId: input.selection.assetId,
+      kind,
+      name: parsed.name,
+      repositoryRoot: repositoryRootPath,
+      files: scanned,
+    });
+    const files = await Promise.all(
+      scanned.map((file) =>
+        readCreationFile({
+          localPath: join(localRoot, file.path),
+          relativePath: file.path,
+          repositoryPath: `${repositoryRootPath}/${file.path}`,
+          asset,
+        }),
+      ),
+    );
+    return {
+      assetId: input.selection.assetId,
+      kind,
+      name: parsed.name,
+      targetPath: localRoot,
+      files,
+      asset,
+    };
+  }
+
+  if (kind === "knowledge") {
+    const name = parseKnowledgeAssetId(input.selection.assetId);
+    if (!name) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        `Invalid knowledge asset id: ${input.selection.assetId}`,
+      );
+    }
+    if (await resolveAsset(input.checkout, input.selection.assetId)) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        "The shared repository already has this knowledge asset",
+      );
+    }
+    const localRoot = join(
+      input.workspaceDirectory,
+      ".agentstorm",
+      "knowledge",
+    );
+    const localPath = join(localRoot, `${name}.md`);
+    await resolveInside(input.workspaceDirectory, localPath);
+    const asset = pseudoAsset({
+      assetId: input.selection.assetId,
+      kind,
+      name,
+      repositoryRoot: `knowledge/${name}.md`,
+      files: [{ path: `${name}.md`, size: 0 }],
+    });
+    const file = await readCreationFile({
+      localPath,
+      relativePath: `${name}.md`,
+      repositoryPath: `knowledge/${name}.md`,
+      asset,
+    });
+    return {
+      assetId: input.selection.assetId,
+      kind,
+      name,
+      targetPath: localPath,
+      files: [file],
+      asset,
+    };
+  }
+
+  const name = parseDocAssetId(input.selection.assetId);
+  if (!name) {
+    throw new PluginError(
+      "E_VALIDATION_FAILED",
+      `Invalid document asset id: ${input.selection.assetId}`,
+    );
+  }
+  if (await resolveAsset(input.checkout, input.selection.assetId)) {
+    throw new PluginError(
+      "E_VALIDATION_FAILED",
+      "The shared repository already has this document",
+    );
+  }
+  const localRoot = join(input.workspaceDirectory, ".agentstorm", "docs", name);
+  await resolveInside(input.workspaceDirectory, localRoot);
+  const scanned = await scanFiles(localRoot);
+  if (scanned.length === 0) {
+    throw new PluginError(
+      "E_VALIDATION_FAILED",
+      `Document has no files to publish: ${name}`,
+    );
+  }
+  const repositoryRootPath = `docs/${name}`;
+  const asset = pseudoAsset({
+    assetId: input.selection.assetId,
+    kind,
+    name,
+    repositoryRoot: repositoryRootPath,
+    files: scanned,
+  });
+  const files = await Promise.all(
+    scanned.map((file) =>
+      readCreationFile({
+        localPath: join(localRoot, file.path),
+        relativePath: file.path,
+        repositoryPath: `${repositoryRootPath}/${file.path}`,
+        asset,
+      }),
+    ),
+  );
+  return {
+    assetId: input.selection.assetId,
+    kind,
+    name,
+    targetPath: localRoot,
+    files,
+    asset,
+  };
+}
+
+function creationPreview(plan: CreationPlan): BatchPublishItemPreview {
+  const diffs: string[] = [];
+  let large = false;
+  for (const file of plan.files) {
+    if (file.size > 256 * 1024) large = true;
+    if (file.text === null) {
+      diffs.push(`${file.repositoryPath}: binary file (no line diff)`);
+    } else {
+      diffs.push(unifiedDiff(file.repositoryPath, "", file.text));
+    }
+  }
+  const reasons: Array<{ code: string; message: string }> = large
+    ? [
+        {
+          code: "E_WARNING_LARGE",
+          message: "Large file: review the diff carefully before committing",
+        },
+      ]
+    : [];
+  return {
+    assetId: plan.assetId,
+    kind: plan.kind,
+    name: plan.name,
+    targetPath: plan.targetPath,
+    create: true,
+    state: reasons.length > 0 ? "warning" : "eligible",
+    reasons,
+    files: plan.files.map((file) => ({
+      path: file.relativePath,
+      repositoryPath: file.repositoryPath,
+      size: file.size,
+      diff:
+        file.text === null
+          ? "binary file (no line diff)"
+          : unifiedDiff(file.repositoryPath, "", file.text),
+    })),
+    diff: diffs.join("\n"),
+  };
 }
 
 export async function previewBatchPublish(
@@ -42,6 +371,38 @@ export async function previewBatchPublish(
   const skipped: Array<{ assetId: string; reason: string }> = [];
 
   for (const selection of input.items) {
+    if (selection.create) {
+      try {
+        const plan = await creationPlan({
+          selection,
+          workspaceDirectory: input.workspaceDirectory,
+          checkout,
+        });
+        items.push(creationPreview(plan));
+      } catch (error) {
+        const kind = selection.kind ?? "knowledge";
+        items.push({
+          assetId: selection.assetId,
+          kind,
+          name: selection.assetId.split("/").pop() ?? selection.assetId,
+          targetPath: "",
+          create: true,
+          state: "ineligible",
+          reasons: [
+            {
+              code:
+                error instanceof PluginError
+                  ? error.code
+                  : "E_VALIDATION_FAILED",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          ],
+          files: [],
+          diff: "",
+        });
+      }
+      continue;
+    }
     let state;
     try {
       state = await resolveState({
@@ -145,6 +506,7 @@ export async function previewBatchPublish(
         kind: resolved.asset.kind,
         name: resolved.asset.name,
         targetPath: resolved.targetPath,
+        create: false,
         state: "ineligible",
         reasons,
         files: previews,
@@ -170,6 +532,7 @@ export async function previewBatchPublish(
       kind: resolved.asset.kind,
       name: resolved.asset.name,
       targetPath: resolved.targetPath,
+      create: false,
       state: reasons.length > 0 ? "warning" : "eligible",
       reasons,
       files: previews,
@@ -182,7 +545,7 @@ export async function previewBatchPublish(
 
 interface WriteAction {
   repositoryPath: string;
-  before: string | null;
+  before: Buffer | null;
 }
 
 export async function commitBatchPublish(
@@ -236,8 +599,28 @@ export async function commitBatchPublish(
       item.files.map((file) => file.repositoryPath),
     ),
   );
+  const publishableIds = new Set(publishable.map((item) => item.assetId));
   try {
     for (const selection of input.items) {
+      if (selection.create) {
+        if (!publishableIds.has(selection.assetId)) continue;
+        const plan = await creationPlan({
+          selection,
+          workspaceDirectory: input.workspaceDirectory,
+          checkout,
+        });
+        for (const file of plan.files) {
+          const absolute = join(checkout, file.repositoryPath);
+          const info = await lstat(absolute).catch(() => null);
+          const before = info?.isFile() ? await readFile(absolute) : null;
+          await atomicWriteFile(absolute, file.buffer);
+          written.push({
+            repositoryPath: file.repositoryPath,
+            before,
+          });
+        }
+        continue;
+      }
       const state = await resolveState({
         projectId: input.projectId,
         workspaceDirectory: input.workspaceDirectory,
@@ -252,7 +635,7 @@ export async function commitBatchPublish(
         }
         const absolute = `${checkout}/${file.file.repositoryPath}`;
         const info = await lstat(absolute).catch(() => null);
-        const before = info?.isFile() ? await readFile(absolute, "utf8") : null;
+        const before = info?.isFile() ? await readFile(absolute) : null;
         await atomicWriteFile(absolute, file.localText);
         written.push({
           repositoryPath: file.file.repositoryPath,

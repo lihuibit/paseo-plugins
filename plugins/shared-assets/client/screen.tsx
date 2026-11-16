@@ -45,6 +45,7 @@ import {
   relationshipsAdoptRpc,
   relationshipsBatchUnlinkRpc,
   relationshipsListRpc,
+  relationshipsReadLocalRpc,
   relationshipsUnlinkRpc,
   skillsSetEnabledRpc,
   statusRpc,
@@ -74,17 +75,21 @@ import {
 } from "./ui/components";
 import { createTokens, type Tokens } from "./ui/tokens";
 
-type Tab =
-  "skills" | "prompt" | "knowledge" | "docs" | "changes" | "drift" | "settings";
+type Tab = "skills" | "prompt" | "knowledge" | "docs" | "drift" | "settings";
 
-type Selection = { assetId: string; provider?: string };
+type PublishItem = {
+  assetId: string;
+  kind: AssetKind;
+  provider?: string;
+  create: boolean;
+  localAssetId: string;
+};
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "skills", label: "Skills" },
   { id: "prompt", label: "SYSTEM Prompt" },
   { id: "knowledge", label: "经验库" },
   { id: "docs", label: "项目文档" },
-  { id: "changes", label: "变更 / 发布" },
   { id: "drift", label: "Drift" },
   { id: "settings", label: "设置" },
 ];
@@ -824,6 +829,7 @@ function ProjectDetail({
   const driftResolveCall = useRpc(driftResolveRpc);
   const providersCall = useRpc(providersListRpc);
   const relationshipsCall = useRpc(relationshipsListRpc);
+  const relationshipsReadLocalCall = useRpc(relationshipsReadLocalRpc);
   const relationshipsAdoptCall = useRpc(relationshipsAdoptRpc);
   const relationshipsUnlinkCall = useRpc(relationshipsUnlinkRpc);
   const relationshipsBatchUnlinkCall = useRpc(relationshipsBatchUnlinkRpc);
@@ -850,7 +856,12 @@ function ProjectDetail({
   const [configuring, setConfiguring] = useState(!project.bound);
   const [confirmUnbind, setConfirmUnbind] = useState(false);
   const [forceUnbind, setForceUnbind] = useState<string | null>(null);
-  const [publishSelection, setPublishSelection] = useState<Selection[]>([]);
+  const [selectedLocalIds, setSelectedLocalIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
+  const [showIgnored, setShowIgnored] = useState(false);
   const [ignoreDialog, setIgnoreDialog] = useState(false);
   const [association, setAssociation] = useState<AssetRelationshipRow | null>(
     null,
@@ -860,9 +871,6 @@ function ProjectDetail({
     null,
   );
   const [preview, setPreview] = useState<BatchPublishPreview | null>(null);
-  const [publishResult, setPublishResult] = useState<BatchPublishResult | null>(
-    null,
-  );
   const [previewOpen, setPreviewOpen] = useState(false);
   const [diffDialog, setDiffDialog] = useState<{
     title: string;
@@ -983,6 +991,13 @@ function ProjectDetail({
     relationshipsCall,
     workspaceId,
   ]);
+
+  useEffect(() => {
+    setSelectedLocalIds(new Set());
+    setBatchMode(false);
+    setBatchSelected(new Set());
+    setShowIgnored(false);
+  }, [project.projectId, provider, tab]);
 
   const run = useCallback(
     async (label: string, work: () => Promise<void>, keepNotice = false) => {
@@ -1180,6 +1195,28 @@ function ProjectDetail({
     }
   };
 
+  const readLocalAssetFile = async (
+    row: AssetRelationshipRow,
+    path?: string,
+  ) => {
+    if (!row.local || !workspaceId) return;
+    try {
+      const result = unwrap(
+        await relationshipsReadLocalCall({
+          projectId: project.projectId,
+          workspaceId,
+          kind: row.local.kind,
+          provider: row.local.provider,
+          localAssetId: row.local.assetId,
+          path,
+        }),
+      ) as AssetReadResult;
+      setReadDialog({ title: row.local.name, result });
+    } catch (value) {
+      setError(messageOf(value));
+    }
+  };
+
   const setEnabled = async (row: AssetRelationshipRow, enabled: boolean) => {
     if (!workspaceId) return;
     if (row.shared?.kind === "skill") {
@@ -1327,8 +1364,54 @@ function ProjectDetail({
     }
   };
 
-  const previewPublish = async () => {
-    if (!workspaceId || publishSelection.length === 0) return;
+  const publishableRows = (relationships?.rows ?? []).filter(
+    (row) => row.local !== null,
+  );
+  const publishItems: PublishItem[] = publishableRows
+    .filter(
+      (row) => row.local !== null && selectedLocalIds.has(row.local.assetId),
+    )
+    .map((row) => ({
+      assetId: row.shared?.assetId ?? assetIdForLocal(row.local!),
+      kind: row.local!.kind,
+      provider: row.local!.provider ?? undefined,
+      create: row.shared === null,
+      localAssetId: row.local!.assetId,
+    }));
+  const selectedCount = publishItems.length;
+
+  const toggleSelected = (row: AssetRelationshipRow) => {
+    if (!row.local) return;
+    const localId = row.local.assetId;
+    setSelectedLocalIds((current) => {
+      const next = new Set(current);
+      if (next.has(localId)) next.delete(localId);
+      else next.add(localId);
+      return next;
+    });
+  };
+
+  const selectAllPublishable = () => {
+    setSelectedLocalIds(
+      new Set(
+        publishableRows
+          .filter((row) => row.local !== null)
+          .map((row) => row.local!.assetId),
+      ),
+    );
+  };
+
+  const selectForPublish = (row: AssetRelationshipRow) => {
+    if (!row.local) return;
+    setSelectedLocalIds((current) => {
+      const next = new Set(current);
+      next.add(row.local!.assetId);
+      return next;
+    });
+  };
+
+  const previewPublish = async (items: PublishItem[] = publishItems) => {
+    if (!workspaceId || items.length === 0) return;
     setBusy("preview");
     setError(null);
     try {
@@ -1336,9 +1419,11 @@ function ProjectDetail({
         await batchPreviewCall({
           projectId: project.projectId,
           workspaceId,
-          items: publishSelection.map((entry) => ({
+          items: items.map((entry) => ({
             assetId: entry.assetId,
             provider: entry.provider,
+            create: entry.create,
+            kind: entry.kind,
           })),
         }),
       ) as BatchPublishPreview;
@@ -1360,14 +1445,15 @@ function ProjectDetail({
         await batchCommitCall({
           projectId: project.projectId,
           workspaceId,
-          items: publishSelection.map((entry) => ({
+          items: publishItems.map((entry) => ({
             assetId: entry.assetId,
             provider: entry.provider,
+            create: entry.create,
+            kind: entry.kind,
           })),
           expectedRevision: preview.expectedRevision,
         }),
       ) as BatchPublishResult;
-      setPublishResult(result);
       setPreview(null);
       setPreviewOpen(false);
       setNotice(
@@ -1375,7 +1461,7 @@ function ProjectDetail({
           ? `已发布 ${result.published.length} 项 · ${result.commit.slice(0, 8)}`
           : "没有写入提交",
       );
-      setPublishSelection([]);
+      setSelectedLocalIds(new Set());
       reload();
       onChanged();
     } catch (value) {
@@ -1386,9 +1472,11 @@ function ProjectDetail({
             await batchPreviewCall({
               projectId: project.projectId,
               workspaceId,
-              items: publishSelection.map((entry) => ({
+              items: publishItems.map((entry) => ({
                 assetId: entry.assetId,
                 provider: entry.provider,
+                create: entry.create,
+                kind: entry.kind,
               })),
             }),
           ) as BatchPublishPreview;
@@ -1416,6 +1504,52 @@ function ProjectDetail({
     (entry) => entry.instructionEntrypoint,
   );
   const activeProviders = kind === "prompt" ? promptProviders : skillProviders;
+  const allRows = relationships?.rows ?? [];
+  const batchRows = allRows.filter((row) => batchSelected.has(row.id));
+  const batchCandidates = batchRows.filter(
+    (row) => row.relationship === "candidate",
+  );
+  const batchSyncable = batchRows.filter(
+    (row) =>
+      row.relationship === "linked" && row.syncStatus === "remote-update",
+  );
+  const batchUnlinkable = batchRows.filter(
+    (row) => row.relationship === "linked",
+  );
+  const batchPublishRows = batchRows.filter((row) => row.local !== null);
+  const batchSelectableCount = allRows.filter(
+    (row) => row.local !== null || row.shared !== null,
+  ).length;
+  const ignoredForView = drift.filter(
+    (item) =>
+      item.ignored &&
+      item.kind === kind &&
+      (item.provider === null || item.provider === provider),
+  );
+
+  const batchPublishItems = batchPublishRows.map((row) => ({
+    assetId: row.shared?.assetId ?? assetIdForLocal(row.local!),
+    kind: row.local!.kind,
+    provider: row.local!.provider ?? undefined,
+    create: row.shared === null,
+    localAssetId: row.local!.assetId,
+  }));
+
+  const syncAllRemote = () =>
+    run("sync-all", async () => {
+      const rows = (relationships?.rows ?? []).filter(
+        (row) =>
+          row.relationship === "linked" && row.syncStatus === "remote-update",
+      );
+      for (const row of rows) {
+        await setEnabled(row, true);
+      }
+      setNotice(
+        rows.length > 0
+          ? `已同步 ${rows.length} 项到本地`
+          : "没有可同步的共享更新",
+      );
+    });
 
   return (
     <View
@@ -1475,7 +1609,7 @@ function ProjectDetail({
         style={{ flex: 1, minHeight: 0 }}
         contentContainerStyle={{
           padding: compact ? 16 : 28,
-          paddingBottom: 48,
+          paddingBottom: kind ? 112 : 48,
           gap: 16,
         }}
       >
@@ -1635,6 +1769,77 @@ function ProjectDetail({
               ))}
             </TabRail>
 
+            {ignoredForView.length > 0 ? (
+              <View style={{ gap: 4 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setShowIgnored((value) => !value)}
+                  style={{ alignSelf: "flex-start" }}
+                  testID="shared-assets-ignored-view-toggle"
+                >
+                  <Text
+                    style={{
+                      color: tokens.colors.foregroundMuted,
+                      fontSize: tokens.fontSize.sm,
+                    }}
+                  >
+                    {showIgnored
+                      ? "收起已忽略的提醒"
+                      : `已忽略 ${ignoredForView.length} 项提醒`}
+                  </Text>
+                </Pressable>
+                {showIgnored ? (
+                  <View
+                    style={{
+                      borderWidth: 1,
+                      borderColor: tokens.colors.border,
+                      borderRadius: tokens.radius.lg,
+                      backgroundColor: tokens.colors.surface1,
+                      paddingHorizontal: tokens.spacing[3],
+                      paddingVertical: tokens.spacing[2],
+                      gap: 4,
+                    }}
+                  >
+                    {ignoredForView.map((item) => (
+                      <View
+                        key={`${item.assetId}/${item.provider ?? ""}`}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: tokens.colors.foreground,
+                            fontSize: tokens.fontSize.sm,
+                            flex: 1,
+                            minWidth: 0,
+                          }}
+                          numberOfLines={1}
+                          ellipsizeMode="middle"
+                        >
+                          {item.name}
+                        </Text>
+                        <Muted tokens={tokens}>
+                          {KIND_LABELS[item.kind]}
+                          {item.provider ? ` · ${item.provider}` : ""}
+                        </Muted>
+                        <Button
+                          tokens={tokens}
+                          size="xs"
+                          variant="ghost"
+                          onPress={() => void ignoreItem(item, false)}
+                        >
+                          恢复提醒
+                        </Button>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
             {kind && activeProviders.length > 0 ? (
               <TabRail>
                 {activeProviders.map((entry) => (
@@ -1661,41 +1866,29 @@ function ProjectDetail({
                 result={relationships}
                 busy={busy}
                 workspaceId={workspaceId}
-                selected={publishSelection}
-                onToggleSelected={(row) => {
-                  if (!row.local) return;
-                  const value = {
-                    assetId: row.shared?.assetId ?? row.local.assetId,
-                    provider: row.local.provider ?? undefined,
-                  };
-                  setPublishSelection((current) => {
-                    const exists = current.some(
-                      (entry) => entry.assetId === value.assetId,
-                    );
-                    return exists
-                      ? current.filter(
-                          (entry) => entry.assetId !== value.assetId,
-                        )
-                      : [...current, value];
+                selectedIds={selectedLocalIds}
+                batchMode={batchMode}
+                batchSelected={batchSelected}
+                onToggleBatchMode={() => {
+                  setBatchMode((value) => !value);
+                  setBatchSelected(new Set());
+                }}
+                onToggleBatch={(row) => {
+                  setBatchSelected((current) => {
+                    const next = new Set(current);
+                    if (next.has(row.id)) next.delete(row.id);
+                    else next.add(row.id);
+                    return next;
                   });
                 }}
+                onSyncAll={() => void syncAllRemote()}
+                onToggleSelected={toggleSelected}
+                onSelectForPublish={selectForPublish}
                 onEnable={(row) =>
                   void run("enable", () => setEnabled(row, true))
                 }
                 onAssociate={(row) => setAssociation(row)}
                 onUnlink={(row) => setUnlink(row)}
-                onBatchUnlink={(rows) => setBatchUnlink(rows)}
-                onPublish={(rows) => {
-                  setPublishSelection(
-                    rows
-                      .filter((row) => row.shared && row.local)
-                      .map((row) => ({
-                        assetId: row.shared!.assetId,
-                        provider: row.local?.provider ?? undefined,
-                      })),
-                  );
-                  setTab("changes");
-                }}
                 onDiff={(row) => void openDiff(row)}
                 onMerge={(row) => void openMerge(row)}
                 onDiscard={(row) =>
@@ -1746,26 +1939,7 @@ function ProjectDetail({
                   })
                 }
                 onRead={(row, path) => void readAssetFile(row, path)}
-              />
-            ) : null}
-
-            {tab === "changes" ? (
-              <ChangesView
-                tokens={tokens}
-                drift={drift}
-                selection={publishSelection}
-                onSelectionChange={setPublishSelection}
-                preview={preview}
-                result={publishResult}
-                busy={busy}
-                onPreview={() => void previewPublish()}
-                onCommit={() => void commitPublish()}
-                onOpenPreview={() => setPreviewOpen(true)}
-                onClear={() => {
-                  setPublishSelection([]);
-                  setPreview(null);
-                  setPublishResult(null);
-                }}
+                onReadLocal={(row, path) => void readLocalAssetFile(row, path)}
               />
             ) : null}
 
@@ -1813,6 +1987,84 @@ function ProjectDetail({
           </>
         ) : null}
       </ScrollView>
+
+      {project.bound && kind ? (
+        <PublishFooter
+          tokens={tokens}
+          compact={compact}
+          kind={kind}
+          selectedCount={selectedCount}
+          publishableCount={publishableRows.length}
+          batchMode={batchMode}
+          batchSelectedCount={batchSelected.size}
+          batchSelectableCount={batchSelectableCount}
+          batchCandidates={batchCandidates.length}
+          batchSyncable={batchSyncable.length}
+          batchPublishable={batchPublishRows.length}
+          batchUnlinkable={batchUnlinkable.length}
+          busy={busy !== null}
+          onSelectAllPublishable={selectAllPublishable}
+          onPreview={() => void previewPublish()}
+          onSelectAllBatch={() =>
+            setBatchSelected(
+              new Set(
+                allRows
+                  .filter((row) => row.local !== null || row.shared !== null)
+                  .map((row) => row.id),
+              ),
+            )
+          }
+          onClearBatch={() => setBatchSelected(new Set())}
+          onBatchAssociate={() =>
+            run("batch-associate", async () => {
+              let done = 0;
+              let failed = 0;
+              for (const row of batchCandidates) {
+                if (!workspaceId || !row.shared || !row.local) continue;
+                try {
+                  unwrap(
+                    await relationshipsAdoptCall({
+                      projectId: project.projectId,
+                      workspaceId,
+                      kind: row.shared.kind,
+                      provider: row.local.provider,
+                      assetId: row.shared.assetId,
+                      localAssetId: row.local.assetId,
+                      mode: "preserve-local",
+                    }),
+                  );
+                  done += 1;
+                } catch {
+                  failed += 1;
+                }
+              }
+              setNotice(`批量关联：成功 ${done} 项，失败 ${failed} 项`);
+            })
+          }
+          onBatchSync={() =>
+            run("batch-sync", async () => {
+              let done = 0;
+              let failed = 0;
+              for (const row of batchSyncable) {
+                try {
+                  await setEnabled(row, true);
+                  done += 1;
+                } catch {
+                  failed += 1;
+                }
+              }
+              setNotice(`批量同步：成功 ${done} 项，失败 ${failed} 项`);
+            })
+          }
+          onBatchPublish={() => {
+            setSelectedLocalIds(
+              new Set(batchPublishRows.map((row) => row.local!.assetId)),
+            );
+            void previewPublish(batchPublishItems);
+          }}
+          onBatchUnlink={() => setBatchUnlink(batchUnlinkable)}
+        />
+      ) : null}
 
       <AssociationDialog
         row={association}
@@ -2211,6 +2463,206 @@ function OverviewCard({
   );
 }
 
+function PublishFooter({
+  tokens,
+  compact,
+  kind,
+  selectedCount,
+  publishableCount,
+  batchMode,
+  batchSelectedCount,
+  batchSelectableCount,
+  batchCandidates,
+  batchSyncable,
+  batchPublishable,
+  batchUnlinkable,
+  busy,
+  onSelectAllPublishable,
+  onPreview,
+  onSelectAllBatch,
+  onClearBatch,
+  onBatchAssociate,
+  onBatchSync,
+  onBatchPublish,
+  onBatchUnlink,
+}: {
+  tokens: Tokens;
+  compact: boolean;
+  kind: AssetKind;
+  selectedCount: number;
+  publishableCount: number;
+  batchMode: boolean;
+  batchSelectedCount: number;
+  batchSelectableCount: number;
+  batchCandidates: number;
+  batchSyncable: number;
+  batchPublishable: number;
+  batchUnlinkable: number;
+  busy: boolean;
+  onSelectAllPublishable: () => void;
+  onPreview: () => void;
+  onSelectAllBatch: () => void;
+  onClearBatch: () => void;
+  onBatchAssociate: () => void;
+  onBatchSync: () => void;
+  onBatchPublish: () => void;
+  onBatchUnlink: () => void;
+}) {
+  return (
+    <View
+      style={{
+        minHeight: 64,
+        flexDirection: batchMode ? "column" : "row",
+        alignItems: batchMode ? "stretch" : "center",
+        justifyContent: "space-between",
+        flexWrap: compact && !batchMode ? "wrap" : "nowrap",
+        gap: tokens.spacing[2],
+        borderTopWidth: 1,
+        borderTopColor: tokens.colors.border,
+        backgroundColor: tokens.colors.surface1,
+        paddingHorizontal: compact ? tokens.spacing[3] : tokens.spacing[4],
+        paddingVertical: compact ? tokens.spacing[2] : tokens.spacing[3],
+      }}
+      testID="shared-assets-publish-footer"
+    >
+      {batchMode ? (
+        <>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: tokens.spacing[2],
+            }}
+          >
+            <Text
+              style={{
+                color: tokens.colors.foregroundMuted,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              已选择 {batchSelectedCount} 项
+            </Text>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="ghost"
+              disabled={busy || batchSelectableCount === 0}
+              onPress={onSelectAllBatch}
+            >
+              全选可操作项
+            </Button>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="ghost"
+              disabled={busy || batchSelectedCount === 0}
+              onPress={onClearBatch}
+            >
+              清空
+            </Button>
+          </View>
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: tokens.spacing[2],
+            }}
+          >
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="secondary"
+              disabled={busy || batchCandidates === 0}
+              onPress={onBatchAssociate}
+            >
+              关联已有本地 · {batchCandidates}
+            </Button>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="secondary"
+              disabled={busy || batchSyncable === 0}
+              onPress={onBatchSync}
+            >
+              同步到本地 · {batchSyncable}
+            </Button>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="secondary"
+              disabled={busy || batchPublishable === 0}
+              onPress={onBatchPublish}
+            >
+              批量发布 · {batchPublishable}
+            </Button>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="ghost"
+              disabled={busy || batchUnlinkable === 0}
+              onPress={onBatchUnlink}
+            >
+              移除关联 · {batchUnlinkable}
+            </Button>
+          </View>
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            {batchSelectedCount === 0
+              ? "勾选要处理的资产；范围限于当前标签页。"
+              : "「关联已有本地」固定保留本地内容，不发布；逐项执行，失败项保持原状。"}
+          </Text>
+        </>
+      ) : (
+        <>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: tokens.spacing[2],
+              flexBasis: compact ? "100%" : undefined,
+            }}
+          >
+            <Text
+              style={{
+                color: tokens.colors.foregroundMuted,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              已选择 {selectedCount} 项本地 {KIND_LABELS[kind]}
+            </Text>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="ghost"
+              disabled={busy || publishableCount === 0}
+              onPress={onSelectAllPublishable}
+            >
+              全选可发布项
+            </Button>
+          </View>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="default"
+            icon="UploadCloud"
+            disabled={busy || selectedCount === 0}
+            onPress={onPreview}
+            testID="shared-assets-preview-publish"
+          >
+            预览并发布
+          </Button>
+        </>
+      )}
+    </View>
+  );
+}
+
 function RelationshipView({
   tokens,
   compact,
@@ -2218,18 +2670,23 @@ function RelationshipView({
   result,
   busy,
   workspaceId,
-  selected,
+  selectedIds,
+  batchMode,
+  batchSelected,
+  onToggleBatchMode,
+  onToggleBatch,
+  onSyncAll,
   onToggleSelected,
+  onSelectForPublish,
   onEnable,
   onAssociate,
   onUnlink,
-  onBatchUnlink,
-  onPublish,
   onDiff,
   onMerge,
   onDiscard,
   onIgnore,
   onRead,
+  onReadLocal,
 }: {
   tokens: Tokens;
   compact: boolean;
@@ -2237,36 +2694,31 @@ function RelationshipView({
   result: RelationshipListResult | null;
   busy: string | null;
   workspaceId: string | null;
-  selected: Selection[];
+  selectedIds: ReadonlySet<string>;
+  batchMode: boolean;
+  batchSelected: ReadonlySet<string>;
+  onToggleBatchMode: () => void;
+  onToggleBatch: (row: AssetRelationshipRow) => void;
+  onSyncAll: () => void;
   onToggleSelected: (row: AssetRelationshipRow) => void;
+  onSelectForPublish: (row: AssetRelationshipRow) => void;
   onEnable: (row: AssetRelationshipRow) => void;
   onAssociate: (row: AssetRelationshipRow) => void;
   onUnlink: (row: AssetRelationshipRow) => void;
-  onBatchUnlink: (rows: AssetRelationshipRow[]) => void;
-  onPublish: (rows: AssetRelationshipRow[]) => void;
   onDiff: (row: AssetRelationshipRow) => void;
   onMerge: (row: AssetRelationshipRow) => void;
   onDiscard: (row: AssetRelationshipRow) => void;
   onIgnore: (row: AssetRelationshipRow, ignored: boolean) => void;
   onRead: (row: AssetRelationshipRow, path?: string) => void;
+  onReadLocal: (row: AssetRelationshipRow, path?: string) => void;
 }) {
-  const [batchMode, setBatchMode] = useState(false);
-  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
   const rows = result?.rows ?? [];
-  const batchRows = rows.filter((row) => batchSelected.has(row.id));
   const candidates = rows.filter((row) => row.relationship === "candidate");
   const remoteUpdates = rows.filter(
     (row) =>
       row.relationship === "linked" && row.syncStatus === "remote-update",
   );
   const linked = rows.filter((row) => row.relationship === "linked");
-  const toggleBatch = (id: string) =>
-    setBatchSelected((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   if (!workspaceId) {
     return <Empty tokens={tokens}>该项目还没有 Workspace。</Empty>;
@@ -2275,67 +2727,178 @@ function RelationshipView({
 
   return (
     <View style={{ gap: 12 }}>
-      <View
-        style={{
-          flexDirection: compact ? "column" : "row",
-          alignItems: compact ? "stretch" : "center",
-          justifyContent: "space-between",
-          gap: 8,
-        }}
-      >
-        <View style={{ gap: 2 }}>
-          <Text
+      {compact ? (
+        <View style={{ gap: 8 }}>
+          <View style={{ gap: 2 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.lg,
+                fontWeight: "600",
+              }}
+            >
+              {KIND_LABELS[kind]} · {rows.length} 项
+            </Text>
+            <Muted tokens={tokens}>
+              {kind === "skill"
+                ? "启用后投影到对应 Provider 的项目级 Skill 目录；停用只删除未被修改的受管副本。"
+                : kind === "prompt"
+                  ? "链路：共享 AGENTS.md → 项目 .agentstorm/AGENTS.md → Provider 原生入口。"
+                  : "共享与本地副本的关联；勾选本地资产后，在底部预览并发布。"}
+            </Muted>
+          </View>
+          <View
             style={{
-              color: tokens.colors.foreground,
-              fontSize: tokens.fontSize.lg,
-              fontWeight: "600",
+              flexDirection: "row",
+              gap: 8,
+              flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
-            {KIND_LABELS[kind]} · {rows.length} 项
-          </Text>
-          <Muted tokens={tokens}>
-            {kind === "skill"
-              ? "启用后投影到对应 Provider 的项目级 Skill 目录；停用只删除未被修改的受管副本。"
-              : kind === "prompt"
-                ? "链路：共享 AGENTS.md → 项目 .agentstorm/AGENTS.md → Provider 原生入口。"
-                : "共享与本地副本的关联；关联后可在「变更 / 发布」中选择发布。"}
-          </Muted>
-        </View>
-        <Button
-          tokens={tokens}
-          size="xs"
-          variant={batchMode ? "default" : "secondary"}
-          style={compact ? { alignSelf: "flex-start" } : undefined}
-          onPress={() => {
-            setBatchMode((value) => !value);
-            setBatchSelected(new Set());
-          }}
-          testID="shared-assets-batch-toggle"
-        >
-          {batchMode ? "退出批量" : "批量操作"}
-        </Button>
-      </View>
-
-      {batchMode && candidates.length > 0 ? (
-        <Panel tokens={tokens}>
-          <SectionTitle tokens={tokens}>
-            {candidates.length} 项同名资产尚未关联
-          </SectionTitle>
-          <Muted tokens={tokens}>
-            一键关联按「保留本地」处理：不改动本地文件，不自动发布；与共享版本不同时显示为本地未发布。
-          </Muted>
-          <View>
+            {kind === "skill" ? (
+              <Button
+                tokens={tokens}
+                size="xs"
+                icon="RefreshCw"
+                onPress={onSyncAll}
+                disabled={busy !== null}
+              >
+                一键同步
+              </Button>
+            ) : null}
             <Button
               tokens={tokens}
               size="xs"
-              icon="Link2"
-              style={{ alignSelf: "flex-start" }}
-              onPress={() => candidates.forEach((row) => onAssociate(row))}
+              variant={batchMode ? "default" : "secondary"}
+              onPress={onToggleBatchMode}
+              testID="shared-assets-batch-toggle"
             >
-              一键关联全部
+              {batchMode ? "退出批量" : "批量操作"}
             </Button>
           </View>
-        </Panel>
+        </View>
+      ) : (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "flex-start",
+            gap: tokens.spacing[3],
+            borderBottomWidth: 1,
+            borderBottomColor: tokens.colors.border,
+            paddingBottom: tokens.spacing[2],
+          }}
+        >
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.lg,
+                fontWeight: "600",
+              }}
+            >
+              共享仓库
+            </Text>
+            <Muted tokens={tokens}>团队可用的 {KIND_LABELS[kind]}</Muted>
+          </View>
+          <View style={{ width: 150, alignItems: "center", gap: 8 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.lg,
+                fontWeight: "600",
+              }}
+            >
+              同步与关联
+            </Text>
+            <View
+              style={{
+                flexDirection: "row",
+                gap: 6,
+                flexWrap: "wrap",
+                justifyContent: "center",
+              }}
+            >
+              {kind === "skill" ? (
+                <Button
+                  tokens={tokens}
+                  size="xs"
+                  icon="RefreshCw"
+                  onPress={onSyncAll}
+                  disabled={busy !== null}
+                >
+                  一键同步
+                </Button>
+              ) : null}
+              <Button
+                tokens={tokens}
+                size="xs"
+                variant={batchMode ? "default" : "secondary"}
+                onPress={onToggleBatchMode}
+                testID="shared-assets-batch-toggle"
+              >
+                {batchMode ? "退出批量" : "批量操作"}
+              </Button>
+            </View>
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.lg,
+                fontWeight: "600",
+              }}
+            >
+              本地 {KIND_LABELS[kind]}
+            </Text>
+            <Muted tokens={tokens}>
+              {kind === "skill"
+                ? "当前 Provider 实际可用"
+                : kind === "prompt"
+                  ? "项目唯一 AGENTS.md 与当前 Provider 链接"
+                  : "当前项目中的可用资产"}
+            </Muted>
+          </View>
+        </View>
+      )}
+
+      {candidates.length > 0 ? (
+        <View
+          style={{
+            flexDirection: compact ? "column" : "row",
+            alignItems: compact ? "stretch" : "center",
+            gap: tokens.spacing[3],
+            borderWidth: 1,
+            borderColor: tokens.colors.border,
+            backgroundColor: tokens.colors.surface1,
+            borderRadius: tokens.radius.lg,
+            paddingHorizontal: tokens.spacing[3],
+            paddingVertical: tokens.spacing[2],
+          }}
+        >
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.base,
+                fontWeight: "600",
+              }}
+            >
+              {candidates.length} 项同名资产尚未关联
+            </Text>
+            <Muted tokens={tokens}>
+              一键关联按「保留本地」处理：不改动本地文件，不自动发布；与共享版本不同时显示为本地未发布。
+            </Muted>
+          </View>
+          <Button
+            tokens={tokens}
+            size="xs"
+            icon="Link2"
+            style={compact ? { alignSelf: "flex-start" } : undefined}
+            onPress={() => candidates.forEach((row) => onAssociate(row))}
+          >
+            一键关联全部
+          </Button>
+        </View>
       ) : null}
 
       {rows.length === 0 ? (
@@ -2345,14 +2908,10 @@ function RelationshipView({
       ) : null}
 
       {rows.map((row) => {
-        const isSelected = selected.some(
-          (entry) =>
-            entry.assetId === (row.shared?.assetId ?? row.local?.assetId),
-        );
-        const publishedLocal =
-          row.local &&
-          row.shared &&
-          (row.relationship === "linked" || row.relationship === "candidate");
+        const isSelected = row.local
+          ? selectedIds.has(row.local.assetId)
+          : false;
+        const batchChecked = batchSelected.has(row.id);
         return (
           <View
             key={row.id}
@@ -2364,11 +2923,17 @@ function RelationshipView({
             testID={`shared-assets-row-${row.shared?.name ?? row.local?.name}`}
           >
             {batchMode ? (
-              <View style={{ justifyContent: "center" }}>
+              <View
+                style={{
+                  width: 28,
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
                 <Checkbox
                   tokens={tokens}
-                  checked={batchSelected.has(row.id)}
-                  onPress={() => toggleBatch(row.id)}
+                  checked={batchChecked}
+                  onPress={() => onToggleBatch(row)}
                   accessibilityLabel={`选择 ${row.shared?.name ?? row.local?.name}`}
                   testID={`shared-batch-select-${row.id}`}
                 />
@@ -2379,124 +2944,25 @@ function RelationshipView({
                 row={row}
                 tokens={tokens}
                 compact={compact}
-                selected={isSelected && Boolean(publishedLocal)}
-                showSelection={Boolean(publishedLocal)}
+                selected={isSelected}
+                showSelection={row.local !== null && !batchMode}
                 busy={busy}
                 onToggleSelected={() => onToggleSelected(row)}
                 onEnable={() => onEnable(row)}
                 onAssociate={() => onAssociate(row)}
                 onUnlink={() => onUnlink(row)}
-                onPublish={() => onPublish([row])}
+                onSelectForPublish={() => onSelectForPublish(row)}
                 onDiff={() => onDiff(row)}
                 onMerge={() => onMerge(row)}
                 onDiscard={() => onDiscard(row)}
                 onIgnore={(ignored) => onIgnore(row, ignored)}
                 onRead={(path) => onRead(row, path)}
+                onReadLocal={(path) => onReadLocal(row, path)}
               />
             </View>
           </View>
         );
       })}
-
-      {batchMode ? (
-        <View
-          style={{
-            flexDirection: "row",
-            gap: 8,
-            flexWrap: "wrap",
-            borderTopWidth: 1,
-            borderTopColor: tokens.colors.border,
-            paddingTop: 12,
-            alignItems: "center",
-          }}
-        >
-          <Muted tokens={tokens}>已选择 {batchRows.length} 项</Muted>
-          {batchRows.length > 0 ? (
-            <>
-              {batchRows.some((row) => row.relationship === "candidate") ? (
-                <Button
-                  tokens={tokens}
-                  size="xs"
-                  onPress={() =>
-                    batchRows
-                      .filter((row) => row.relationship === "candidate")
-                      .forEach((row) => onAssociate(row))
-                  }
-                >
-                  关联已有本地
-                </Button>
-              ) : null}
-              {batchRows.some(
-                (row) =>
-                  row.relationship === "linked" &&
-                  row.syncStatus === "remote-update",
-              ) ? (
-                <Button
-                  tokens={tokens}
-                  size="xs"
-                  onPress={() =>
-                    batchRows
-                      .filter(
-                        (row) =>
-                          row.relationship === "linked" &&
-                          row.syncStatus === "remote-update",
-                      )
-                      .forEach((row) => onEnable(row))
-                  }
-                >
-                  批量同步到本地
-                </Button>
-              ) : null}
-              {batchRows.some((row) => row.local && row.shared) ? (
-                <Button
-                  tokens={tokens}
-                  size="xs"
-                  variant="default"
-                  onPress={() =>
-                    onPublish(
-                      batchRows.filter((row) => row.shared && row.local),
-                    )
-                  }
-                >
-                  批量发布
-                </Button>
-              ) : null}
-              {batchRows.some((row) => row.relationship === "linked") ? (
-                <Button
-                  tokens={tokens}
-                  size="xs"
-                  variant="danger"
-                  onPress={() =>
-                    onBatchUnlink(
-                      batchRows.filter((row) => row.relationship === "linked"),
-                    )
-                  }
-                >
-                  批量解除关联
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-          <Button
-            tokens={tokens}
-            size="xs"
-            variant="ghost"
-            onPress={() => {
-              setBatchSelected(new Set(rows.map((row) => row.id)));
-            }}
-          >
-            全选
-          </Button>
-          <Button
-            tokens={tokens}
-            size="xs"
-            variant="ghost"
-            onPress={() => setBatchSelected(new Set())}
-          >
-            清空
-          </Button>
-        </View>
-      ) : null}
 
       {remoteUpdates.length > 0 && !batchMode ? (
         <Muted tokens={tokens}>
@@ -2522,12 +2988,13 @@ function RelationshipRow({
   onEnable,
   onAssociate,
   onUnlink,
-  onPublish,
+  onSelectForPublish,
   onDiff,
   onMerge,
   onDiscard,
   onIgnore,
   onRead,
+  onReadLocal,
 }: {
   row: AssetRelationshipRow;
   tokens: Tokens;
@@ -2539,12 +3006,13 @@ function RelationshipRow({
   onEnable: () => void;
   onAssociate: () => void;
   onUnlink: () => void;
-  onPublish: () => void;
+  onSelectForPublish: () => void;
   onDiff: () => void;
   onMerge: () => void;
   onDiscard: () => void;
   onIgnore: (ignored: boolean) => void;
   onRead: (path?: string) => void;
+  onReadLocal: (path?: string) => void;
 }) {
   const shared = row.shared;
   const local = row.local;
@@ -2559,12 +3027,22 @@ function RelationshipRow({
   const isPrivate = row.relationship === "private";
   const isCandidate = row.relationship === "candidate";
   const isSharedOnly = row.relationship === "shared-only";
+  const isConflict = row.relationship === "conflict";
   const isSynced =
     row.relationship === "linked" &&
     !isRemoteUpdate &&
     !isDiverged &&
     !isLocalUpdate &&
     !isRemoteDeleted;
+  const localDetail = !local
+    ? ""
+    : isPrivate
+      ? `将创建新的共享 ${KIND_LABELS[local.kind]}`
+      : isCandidate
+        ? `将更新同名共享 ${KIND_LABELS[local.kind]}`
+        : row.relationship === "linked"
+          ? `将更新已关联的共享 ${KIND_LABELS[local.kind]}`
+          : "";
 
   const sharedCard = shared ? (
     <View
@@ -2572,44 +3050,62 @@ function RelationshipRow({
         {
           flex: compact ? undefined : 1,
           minWidth: 0,
+          minHeight: compact ? undefined : 112,
           borderWidth: 1,
           borderColor:
             row.relationship === "linked"
               ? tokens.colors.accent
               : tokens.colors.border,
-          backgroundColor: tokens.colors.surface1,
+          backgroundColor: isRemoteUpdate
+            ? `${tokens.colors.accent}12`
+            : isLocalUpdate
+              ? `${tokens.colors.warning}10`
+              : isDiverged || isRemoteDeleted
+                ? `${tokens.colors.danger}10`
+                : tokens.colors.surface1,
           borderRadius: tokens.radius.lg,
           padding: tokens.spacing[3],
           gap: 4,
         },
         isDiverged ? { borderColor: tokens.colors.danger } : null,
         isRemoteDeleted ? { borderColor: tokens.colors.danger } : null,
-        isRemoteUpdate ? { borderColor: tokens.colors.warning } : null,
+        isRemoteUpdate ? { borderColor: tokens.colors.accent } : null,
         isLocalUpdate ? { borderColor: tokens.colors.warning } : null,
       ]}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Icon
-          name={
-            isRemoteDeleted
-              ? "X"
-              : isRemoteUpdate
-                ? "RefreshCw"
-                : isLocalUpdate
-                  ? "UploadCloud"
-                  : row.relationship === "linked"
-                    ? "Check"
-                    : "LibraryBig"
-          }
-          size={14}
-          color={
-            isRemoteDeleted || isDiverged
-              ? tokens.colors.danger
-              : isRemoteUpdate || isLocalUpdate
-                ? tokens.colors.warning
-                : tokens.colors.accent
-          }
-        />
+        <View
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: tokens.radius.md,
+            backgroundColor: tokens.colors.surface2,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Icon
+            name={
+              isRemoteDeleted
+                ? "X"
+                : isRemoteUpdate
+                  ? "RefreshCw"
+                  : isLocalUpdate
+                    ? "UploadCloud"
+                    : row.relationship === "linked"
+                      ? "Check"
+                      : "LibraryBig"
+            }
+            size={14}
+            color={
+              isRemoteDeleted || isDiverged
+                ? tokens.colors.danger
+                : isRemoteUpdate || isLocalUpdate
+                  ? tokens.colors.warning
+                  : tokens.colors.accent
+            }
+          />
+        </View>
         <Text
           style={{
             color: tokens.colors.foreground,
@@ -2666,22 +3162,39 @@ function RelationshipRow({
         padding: 8,
       }}
     >
-      <Muted tokens={tokens}>
-        {isPrivate ? "共享仓库中不存在" : "尚未添加到本地"}
-      </Muted>
+      {isPrivate ? null : <Muted tokens={tokens}>尚未添加到本地</Muted>}
     </View>
   );
 
   const localCard = local ? (
-    <View
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected, disabled: !showSelection }}
+      disabled={!showSelection}
+      onPress={onToggleSelected}
       style={{
         flex: compact ? undefined : 1,
         minWidth: 0,
+        minHeight: compact ? undefined : 112,
         borderWidth: 1,
-        borderColor: isRemoteUpdate
-          ? tokens.colors.warning
-          : tokens.colors.border,
-        backgroundColor: tokens.colors.surface0,
+        borderColor: selected
+          ? tokens.colors.accent
+          : isRemoteUpdate
+            ? tokens.colors.accent
+            : isLocalUpdate || isDiverged || isRemoteDeleted
+              ? isDiverged || isRemoteDeleted
+                ? tokens.colors.danger
+                : tokens.colors.warning
+              : tokens.colors.border,
+        backgroundColor: selected
+          ? tokens.colors.surface2
+          : isRemoteUpdate
+            ? `${tokens.colors.accent}0a`
+            : isLocalUpdate
+              ? `${tokens.colors.warning}08`
+              : isDiverged || isRemoteDeleted
+                ? `${tokens.colors.danger}08`
+                : tokens.colors.surface1,
         borderRadius: tokens.radius.lg,
         padding: tokens.spacing[3],
         gap: 4,
@@ -2689,13 +3202,16 @@ function RelationshipRow({
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         {showSelection ? (
-          <Checkbox
-            tokens={tokens}
-            checked={selected}
-            onPress={onToggleSelected}
-            accessibilityLabel={`选择发布 ${local.name}`}
-            testID={`shared-assets-publish-select-${local.name}`}
-          />
+          <View pointerEvents="none">
+            <Checkbox
+              tokens={tokens}
+              checked={selected}
+              onPress={onToggleSelected}
+              size={20}
+              accessibilityLabel={`选择发布 ${local.name}`}
+              testID={`shared-assets-publish-select-${local.name}`}
+            />
+          </View>
         ) : null}
         <Text
           style={{
@@ -2708,34 +3224,122 @@ function RelationshipRow({
         >
           {local.name}
         </Text>
-        <Badge tokens={tokens} label={local.provider ?? "项目级"} />
+        <Badge tokens={tokens} label={local.provider ?? "本地"} />
+        {isPrivate ? (
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.sm,
+              borderRadius: tokens.radius.full,
+              borderWidth: 1,
+              borderColor: tokens.colors.border,
+              paddingHorizontal: tokens.spacing[2],
+              paddingVertical: 2,
+            }}
+          >
+            私有
+          </Text>
+        ) : null}
       </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={(event) => {
+          event.stopPropagation();
+          onReadLocal();
+        }}
+        style={{ alignSelf: "flex-start" }}
+      >
+        <Text
+          style={{
+            color: tokens.colors.accent,
+            fontSize: tokens.fontSize.xs,
+          }}
+        >
+          预览
+        </Text>
+      </Pressable>
       <Mono tokens={tokens} numberOfLines={1}>
         {local.path}
       </Mono>
       <Muted tokens={tokens} numberOfLines={1}>
-        {local.fileCount} 个文件
-        {local.description ? ` · ${local.description}` : ""}
+        {local.description || "无描述"}
       </Muted>
-      {row.relationship === "private" ? (
-        <View style={{ flexDirection: "row", gap: 8 }}>
+      {localDetail ? (
+        <Text
+          style={{
+            color: tokens.colors.foregroundMuted,
+            fontSize: tokens.fontSize.sm,
+          }}
+        >
+          {localDetail}
+        </Text>
+      ) : null}
+      {isLocalUpdate || isDiverged || isRemoteDeleted ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            borderRadius: tokens.radius.full,
+            borderWidth: 1,
+            borderColor:
+              isDiverged || isRemoteDeleted
+                ? tokens.colors.danger
+                : tokens.colors.warning,
+            backgroundColor: `${isDiverged || isRemoteDeleted ? tokens.colors.danger : tokens.colors.warning}12`,
+            paddingHorizontal: tokens.spacing[2],
+            paddingVertical: 2,
+            alignSelf: "flex-start",
+          }}
+        >
+          <Icon
+            name={isDiverged || isRemoteDeleted ? "X" : "UploadCloud"}
+            size={12}
+            color={
+              isDiverged || isRemoteDeleted
+                ? tokens.colors.danger
+                : tokens.colors.warning
+            }
+          />
+          <Text
+            style={{
+              color:
+                isDiverged || isRemoteDeleted
+                  ? tokens.colors.danger
+                  : tokens.colors.warning,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            {isDiverged
+              ? "共享端与本地均有修改"
+              : isRemoteDeleted
+                ? "共享仓库已删除，本地副本仍保留"
+                : "本地有未发布修改"}
+          </Text>
+        </View>
+      ) : null}
+      {isPrivate ? (
+        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
           <Text
             style={{
               color: tokens.colors.foregroundMuted,
-              fontSize: tokens.fontSize.xs,
+              fontSize: tokens.fontSize.sm,
             }}
           >
-            未同步远端
+            尚未同步到共享库
           </Text>
           {row.syncStatus === "unpublished-local" ? (
             <Pressable
               accessibilityRole="button"
-              onPress={() => onIgnore(true)}
+              onPress={(event) => {
+                event.stopPropagation();
+                onIgnore(true);
+              }}
             >
               <Text
                 style={{
                   color: tokens.colors.accent,
-                  fontSize: tokens.fontSize.xs,
+                  fontSize: tokens.fontSize.sm,
                 }}
               >
                 忽略提醒
@@ -2744,10 +3348,13 @@ function RelationshipRow({
           ) : null}
         </View>
       ) : null}
-      {row.relationship === "linked" && row.driftFiles > 0 ? (
-        <Muted tokens={tokens}>{row.driftFiles} 个文件有差异</Muted>
-      ) : null}
-    </View>
+      <Muted tokens={tokens}>
+        {local.fileCount} 个文件
+        {row.relationship === "linked" && row.driftFiles > 0
+          ? ` · ${row.driftFiles} 个有差异`
+          : ""}
+      </Muted>
+    </Pressable>
   ) : (
     <View
       style={{
@@ -2769,12 +3376,13 @@ function RelationshipRow({
   const actions = (
     <View
       style={{
-        width: compact ? undefined : 160,
-        gap: 6,
+        width: compact ? undefined : 150,
+        gap: tokens.spacing[2],
         alignItems: compact ? "flex-start" : "center",
         justifyContent: "center",
         flexDirection: compact ? "row" : "column",
         flexWrap: "wrap",
+        position: compact ? undefined : "relative",
       }}
     >
       {isPrivate ? (
@@ -2785,6 +3393,9 @@ function RelationshipRow({
             color={tokens.colors.foregroundMuted}
           />
           <Muted tokens={tokens}>本地私有</Muted>
+          <Button tokens={tokens} size="xs" onPress={onSelectForPublish}>
+            选择发布
+          </Button>
         </>
       ) : isCandidate ? (
         <>
@@ -2793,6 +3404,18 @@ function RelationshipRow({
           <Button tokens={tokens} size="xs" onPress={onAssociate}>
             关联已有本地
           </Button>
+        </>
+      ) : isConflict ? (
+        <>
+          <Icon name="X" size={15} color={tokens.colors.danger} />
+          <Text
+            style={{
+              color: tokens.colors.danger,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            同名但未关联
+          </Text>
         </>
       ) : isSharedOnly ? (
         <>
@@ -2815,7 +3438,7 @@ function RelationshipRow({
         <>
           <Badge tokens={tokens} label="远端已删除" tone="danger" />
           <Muted tokens={tokens}>本地副本仍保留</Muted>
-          <Button tokens={tokens} size="xs" onPress={onPublish}>
+          <Button tokens={tokens} size="xs" onPress={onSelectForPublish}>
             重新发布
           </Button>
           <Button tokens={tokens} size="xs" variant="ghost" onPress={onUnlink}>
@@ -2853,7 +3476,7 @@ function RelationshipRow({
             tokens={tokens}
             size="xs"
             variant={isDiverged ? "ghost" : "secondary"}
-            onPress={onPublish}
+            onPress={onSelectForPublish}
           >
             选择发布
           </Button>
@@ -2880,8 +3503,39 @@ function RelationshipRow({
         </>
       ) : isSynced ? (
         <>
-          <Icon name="Link2" size={13} color={tokens.colors.accent} />
-          <Muted tokens={tokens}>已同步关联</Muted>
+          {compact ? null : (
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: "38%",
+                height: 1,
+                backgroundColor: tokens.colors.accent,
+              }}
+            />
+          )}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              borderRadius: tokens.radius.full,
+              backgroundColor: tokens.colors.surfaceWorkspace,
+              paddingHorizontal: tokens.spacing[2],
+              paddingVertical: 2,
+            }}
+          >
+            <Icon name="Link2" size={13} color={tokens.colors.accent} />
+            <Text
+              style={{
+                color: tokens.colors.accent,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              已同步关联
+            </Text>
+          </View>
           <Button tokens={tokens} size="xs" variant="ghost" onPress={onUnlink}>
             移除关联
           </Button>
@@ -2918,218 +3572,6 @@ function RelationshipRow({
       {actions}
       {localCard}
     </View>
-  );
-}
-
-function ChangesView({
-  tokens,
-  drift,
-  selection,
-  onSelectionChange,
-  preview,
-  result,
-  busy,
-  onPreview,
-  onCommit,
-  onOpenPreview,
-  onClear,
-}: {
-  tokens: Tokens;
-  drift: DriftItem[];
-  selection: Selection[];
-  onSelectionChange: (value: Selection[]) => void;
-  preview: BatchPublishPreview | null;
-  result: BatchPublishResult | null;
-  busy: string | null;
-  onPreview: () => void;
-  onCommit: () => void;
-  onOpenPreview: () => void;
-  onClear: () => void;
-}) {
-  const publishable = drift.filter(
-    (item) => item.status === "local-update" || item.status === "diverged",
-  );
-  const selected = new Set(selection.map((entry) => entry.assetId));
-  return (
-    <Panel tokens={tokens}>
-      <SectionTitle tokens={tokens}>选择性批量发布</SectionTitle>
-      <Muted tokens={tokens}>
-        只发布勾选的资产；逐项校验，部分失败不阻断其余项；有未解决冲突的资产会被拒绝。预览过期时会自动重新加载，不会直接提交。
-      </Muted>
-      {publishable.length === 0 ? (
-        <Empty tokens={tokens}>当前没有可发布的本地修改。</Empty>
-      ) : null}
-      {publishable.map((item) => (
-        <Pressable
-          key={`${item.assetId}/${item.provider ?? ""}`}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: selected.has(item.assetId) }}
-          onPress={() =>
-            onSelectionChange(
-              selected.has(item.assetId)
-                ? selection.filter((entry) => entry.assetId !== item.assetId)
-                : [
-                    ...selection,
-                    {
-                      assetId: item.assetId,
-                      provider: item.provider ?? undefined,
-                    },
-                  ],
-            )
-          }
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingVertical: 8,
-            borderBottomWidth: 1,
-            borderBottomColor: tokens.colors.border,
-          }}
-          testID={`shared-assets-select-${item.name}`}
-        >
-          <Checkbox
-            tokens={tokens}
-            checked={selected.has(item.assetId)}
-            onPress={() =>
-              onSelectionChange(
-                selected.has(item.assetId)
-                  ? selection.filter((entry) => entry.assetId !== item.assetId)
-                  : [
-                      ...selection,
-                      {
-                        assetId: item.assetId,
-                        provider: item.provider ?? undefined,
-                      },
-                    ],
-              )
-            }
-          />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text
-              style={{
-                color: tokens.colors.foreground,
-                fontSize: tokens.fontSize.base,
-              }}
-            >
-              {item.name}{" "}
-              <Text
-                style={{
-                  color: tokens.colors.foregroundMuted,
-                  fontSize: tokens.fontSize.xs,
-                }}
-              >
-                · {KIND_LABELS[item.kind]}
-                {item.provider ? ` · ${item.provider}` : ""}
-              </Text>
-            </Text>
-            <Mono tokens={tokens} numberOfLines={1}>
-              {item.targetPath}
-            </Mono>
-          </View>
-          <Badge
-            tokens={tokens}
-            label={ATTENTION_LABELS[item.status]}
-            tone={DRIFT_TONES[item.status]}
-          />
-        </Pressable>
-      ))}
-      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-        <Button
-          tokens={tokens}
-          size="xs"
-          variant="default"
-          onPress={onPreview}
-          disabled={selection.length === 0 || busy !== null}
-          testID="shared-assets-batch-preview"
-        >
-          校验并预览
-        </Button>
-        <Button
-          tokens={tokens}
-          size="xs"
-          onPress={onOpenPreview}
-          disabled={!preview}
-          testID="shared-assets-batch-commit"
-        >
-          查看发布预览
-        </Button>
-        <Button tokens={tokens} size="xs" variant="ghost" onPress={onClear}>
-          清空选择
-        </Button>
-      </View>
-      {preview ? (
-        <View style={{ gap: 4 }}>
-          <Muted tokens={tokens}>
-            基线 revision {preview.expectedRevision.slice(0, 8)} ·{" "}
-            {preview.items.length} 项可发布
-          </Muted>
-          {preview.skipped.map((entry) => (
-            <Text
-              key={entry.assetId}
-              style={{
-                color: tokens.colors.warning,
-                fontSize: tokens.fontSize.sm,
-              }}
-            >
-              跳过 {entry.assetId}：{entry.reason}
-            </Text>
-          ))}
-          <Button
-            tokens={tokens}
-            size="xs"
-            variant="default"
-            style={{ alignSelf: "flex-start" }}
-            onPress={onCommit}
-            disabled={busy !== null}
-          >
-            确认发布
-          </Button>
-        </View>
-      ) : null}
-      {result ? (
-        <View
-          style={{
-            gap: 2,
-            borderTopWidth: 1,
-            borderTopColor: tokens.colors.border,
-            paddingTop: 8,
-          }}
-          testID="shared-assets-batch-result"
-        >
-          <Text
-            style={{
-              color: tokens.colors.foreground,
-              fontSize: tokens.fontSize.base,
-            }}
-          >
-            {result.commit
-              ? `已提交 ${result.commit.slice(0, 8)}`
-              : "没有写入提交"}
-          </Text>
-          <Text
-            style={{
-              color: tokens.colors.success,
-              fontSize: tokens.fontSize.sm,
-            }}
-          >
-            成功 {result.published.length} · 失败 {result.failed.length} · 跳过{" "}
-            {result.skipped.length}
-          </Text>
-          {result.failed.map((entry) => (
-            <Text
-              key={`fail-${entry.assetId}`}
-              style={{
-                color: tokens.colors.danger,
-                fontSize: tokens.fontSize.sm,
-              }}
-            >
-              {entry.assetId}: {entry.reason}
-            </Text>
-          ))}
-          <Muted tokens={tokens}>{result.pushHint}</Muted>
-        </View>
-      ) : null}
-    </Panel>
   );
 }
 
@@ -3865,6 +4307,18 @@ function PublishPreviewDialog({
                     }
                   />
                 </View>
+                <Text
+                  style={{
+                    color: item.create
+                      ? tokens.colors.accent
+                      : tokens.colors.foregroundMuted,
+                    fontSize: tokens.fontSize.sm,
+                  }}
+                >
+                  {item.create
+                    ? `将创建新的共享 ${KIND_LABELS[item.kind]}`
+                    : `将更新同名共享 ${KIND_LABELS[item.kind]}`}
+                </Text>
                 {item.reasons.map((reason) => (
                   <Text
                     key={reason.code}

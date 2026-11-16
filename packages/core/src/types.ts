@@ -294,6 +294,8 @@ export interface BatchPublishItemPreview {
   kind: AssetKind;
   name: string;
   targetPath: string;
+  /** True when this publish creates a new shared asset from a local one. */
+  create: boolean;
   state: BatchPublishState;
   reasons: BatchPublishReason[];
   files: BatchPublishFilePreview[];
@@ -342,7 +344,7 @@ export interface DriftIgnoreEntry {
 }
 
 export type AssetRelationship =
-  "linked" | "candidate" | "private" | "shared-only";
+  "linked" | "candidate" | "private" | "shared-only" | "conflict";
 
 export interface LocalAssetSummary {
   /** Local-only identity; never stored in the shared repository. */

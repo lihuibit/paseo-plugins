@@ -361,6 +361,82 @@ async function main() {
   };
   step("ignore rules", evidence.assertions.ignoreRules);
 
+  await execFileSync(
+    "mkdir",
+    ["-p", join(demo, ".codex/skills/private-publish")],
+    { encoding: "utf8" },
+  );
+  await writeFile(
+    join(demo, ".codex/skills/private-publish/SKILL.md"),
+    "---\nname: private-publish\ndescription: Local-only skill\n---\n\n# Private\n",
+  );
+  const privateRows = await relationshipRows("skill", "codex");
+  const privateRow = privateRows.find(
+    (row) => row.local?.name === "private-publish",
+  );
+  assert(privateRow?.relationship === "private", "local skill is not private");
+  const localPreview = await callOk("shared-assets.relationships.read-local", {
+    projectId,
+    workspaceId,
+    kind: "skill",
+    provider: "codex",
+    localAssetId: "local-skill:codex/private-publish",
+  });
+  assert(
+    localPreview.content?.includes("name: private-publish"),
+    "local private Skill preview failed",
+  );
+  const createPreview = await callOk("shared-assets.publish.batch.preview", {
+    projectId,
+    workspaceId,
+    items: [
+      {
+        assetId: "skill:project/private-publish",
+        kind: "skill",
+        provider: "codex",
+        create: true,
+      },
+    ],
+  });
+  assert(
+    createPreview.items[0]?.create === true &&
+      createPreview.items[0]?.state === "eligible",
+    "private skill preview is not a create item",
+  );
+  const createResult = await callOk("shared-assets.publish.batch.commit", {
+    projectId,
+    workspaceId,
+    items: [
+      {
+        assetId: "skill:project/private-publish",
+        kind: "skill",
+        provider: "codex",
+        create: true,
+      },
+    ],
+    expectedRevision: createPreview.expectedRevision,
+  });
+  assert(
+    createResult.published.length === 1,
+    "private skill was not published",
+  );
+  const createdAssets = await callOk("shared-assets.assets.list", {
+    projectId,
+  });
+  assert(
+    createdAssets.some(
+      (asset) => asset.assetId === "skill:project/private-publish",
+    ),
+    "created skill is missing from the shared repository",
+  );
+  evidence.assertions.privatePublish = {
+    preview: createPreview.items[0],
+    published: createResult.published,
+  };
+  step("private local publish creates a shared Skill", {
+    assetId: createResult.published[0]?.assetId,
+  });
+
   await execFileSync("mkdir", ["-p", join(checkout, "skills/global/legacy")], {
     encoding: "utf8",
   });

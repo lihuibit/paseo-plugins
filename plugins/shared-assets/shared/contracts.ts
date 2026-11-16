@@ -435,7 +435,13 @@ export const LocalAssetSummarySchema = z.object({
 
 export const AssetRelationshipRowSchema = z.object({
   id: z.string().min(1),
-  relationship: z.enum(["linked", "candidate", "private", "shared-only"]),
+  relationship: z.enum([
+    "linked",
+    "candidate",
+    "private",
+    "shared-only",
+    "conflict",
+  ]),
   shared: AssetSummarySchema.nullable(),
   local: LocalAssetSummarySchema.nullable(),
   syncStatus: DriftStatusSchema.nullable(),
@@ -468,6 +474,21 @@ export const relationshipsListRpc = defineRpc({
     })
     .strict(),
   output: envelope(RelationshipListResultSchema),
+});
+
+export const relationshipsReadLocalRpc = defineRpc({
+  name: "shared-assets.relationships.read-local",
+  input: z
+    .object({
+      projectId: z.string().min(1),
+      workspaceId: z.string().min(1),
+      kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
+      provider: z.string().min(1).nullable().default(null),
+      localAssetId: z.string().min(1),
+      path: z.string().min(1).optional(),
+    })
+    .strict(),
+  output: envelope(AssetReadResultSchema),
 });
 
 export const relationshipsAdoptRpc = defineRpc({
@@ -640,6 +661,8 @@ const BatchSelectionSchema = z.object({
   assetId: z.string().min(1),
   path: z.string().optional(),
   provider: z.string().optional(),
+  create: z.boolean().default(false),
+  kind: z.enum(["skill", "prompt", "knowledge", "doc"]).optional(),
 });
 
 export const BatchPublishPreviewSchema = z.object({
@@ -650,6 +673,7 @@ export const BatchPublishPreviewSchema = z.object({
       kind: z.enum(["skill", "prompt", "knowledge", "doc"]),
       name: z.string().min(1),
       targetPath: z.string().min(1),
+      create: z.boolean(),
       state: z.enum(["eligible", "warning", "ineligible", "skipped"]),
       reasons: z.array(
         z.object({ code: z.string().min(1), message: z.string().min(1) }),

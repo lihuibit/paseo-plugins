@@ -52,6 +52,26 @@ await writeFile(
   join(origin, "knowledge/beta.md"),
   "# Beta\n\nUsed by I5 shared-asset relationship and attention checks.\n",
 );
+await writeFile(
+  join(origin, "knowledge/deploy.md"),
+  "# Deploy\n\n1. Run the test suite.\n2. Build the release artifact.\n3. Announce the rollout.\n",
+);
+await mkdir(join(origin, "docs/design/assets"), { recursive: true });
+await writeFile(
+  join(origin, "docs/design/README.md"),
+  "# Design package\n\n![flow](assets/flow.png)\n",
+);
+await writeFile(
+  join(origin, "docs/design/assets/flow.png"),
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  ),
+);
+await writeFile(
+  join(origin, "docs/design/assets/notes.txt"),
+  "Binary-safe attachment fixture.\n",
+);
 
 git(origin, "init", "--quiet");
 git(origin, "config", "user.name", "Release Fixture");
