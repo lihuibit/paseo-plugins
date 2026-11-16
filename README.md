@@ -36,8 +36,9 @@ Paseo 插件 monorepo。
   `featureValues`，对调用方仍返回 `options`。
 - `agent.create.after` 的 hook agent 没有 `metadata`，看板改用 `agent.open.before`
   携带的 `agentstorm.task-id` label 完成绑定；metadata 仍会传给 0.16。
-- `background: true` 在 0.15.4 只允许用于新建 Workspace；看板在已有 Workspace 创建
-  Agent 时遇到该错误会自动去掉 `background` 重试。
+- 看板创建的 Agent 使用 `background: false`：Paseo 的 workspace 活动索引会跳过
+  background agent，不设为可见就不会有侧栏「正在运行」状态。0.15.4 的
+  “已有 Workspace 不接受 background” 兜底重试仍保留，但主路径不会再触发。
 - `PaseoAgent.background` 不在 0.15.4 快照类型里，读取时按可选字段处理。
 
 ## 目录

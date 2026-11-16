@@ -229,7 +229,10 @@ agentstorm.task-id=<btask_id>
 - Paseo 0.16 的 `PaseoApi` 没有公开 `cancelAgent`。`task-board.stop` 用
   `agent.reload()` 中断当前 turn（会话与历史保留），卡片立即写 `blocked(manual)`。
 - UI 用 2.5 秒轮询 `task-board.list`，没有实现 `task-board.watch` 订阅。
-- `background: true` 只影响可见性；无人值守由 `modeId`（如 `full-access`）表达。
+- 看板创建的 Agent 为 `background: false`。Paseo 的 workspace 活动索引跳过
+  background agent，只有可见 Agent 才会让 Workspace 行显示运行状态；无人值守仍由
+  `modeId`（如 `full-access`）表达。代价是这些 Agent 会出现在 Paseo 的普通 Agent
+  列表中。
 - Paseo 0.16 的 `PluginServerContext` 不暴露 `PaseoApi`，插件没有 server 启动回调；
   调度器只能在第一次 RPC 或 hook 到达时布防。daemon 重启后在该客户端连接之前定时
   任务不会触发；首次访问会按持久化的 `nextRunAt` 补跑一次到期任务，不按错过次数

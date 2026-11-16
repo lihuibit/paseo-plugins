@@ -104,7 +104,7 @@ async function main() {
       "agentstorm.task-id": task.id,
       "agentstorm.kind": "task",
     },
-    background: true,
+    background: false,
   };
   step("assigned and started", report.assertions.assignment);
 

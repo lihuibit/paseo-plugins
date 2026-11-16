@@ -113,7 +113,9 @@ export async function createAgentForTask(
     },
     title: agentInput.title ?? `${task.displayId} ${task.title}`,
     labels: boardLabels(task),
-    background: true,
+    // Paseo skips background agents in `buildWorkspaceAgentActivityIndex`, so a
+    // board agent must be visible for its workspace to show the running state.
+    background: false,
   };
   // Paseo 0.15.x strips unknown create fields; 0.16 uses metadata in hooks.
   const metadata = {
@@ -174,7 +176,8 @@ async function createBoardAgent(
       metadata,
     } as AgentCreateRequest & { metadata: Record<string, unknown> });
   } catch (error) {
-    // Paseo 0.15.x only accepts background when creating a new workspace.
+    // Paseo 0.15.x rejects background agents in an existing workspace. The
+    // board no longer sends `background: true`, so this is a defensive fallback.
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("background is workspace creation intent")) {
       throw error;

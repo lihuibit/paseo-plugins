@@ -103,7 +103,13 @@ describe("board agent ownership", () => {
     expect(Object.keys(options.metadata).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("retries without background on Paseo 0.15.x", async () => {
+  it("creates a visible agent so workspace activity includes it", async () => {
+    const captured: { createOptions?: Record<string, unknown> } = {};
+    await createAgentForTask(fakePaseo(captured), task("task"), assignment);
+    expect(captured.createOptions?.background).toBe(false);
+  });
+
+  it("keeps the background retry fallback for Paseo 0.15.x", async () => {
     const calls: Array<Record<string, unknown>> = [];
     const api = {
       workspaces: {
@@ -126,7 +132,7 @@ describe("board agent ownership", () => {
 
     const created = await createAgentForTask(api, task("task"), assignment);
     expect(created.execution.agentId).toBe("agent_retry");
-    expect(calls[0]?.background).toBe(true);
+    expect(calls[0]?.background).toBe(false);
     expect(calls[1]?.background).toBeUndefined();
     expect(calls[1]?.metadata).toBeDefined();
   });

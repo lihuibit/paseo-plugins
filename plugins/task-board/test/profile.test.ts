@@ -145,7 +145,7 @@ describe("Paseo Agent Profiles", () => {
         "agentstorm.board": "1",
         "agentstorm.task-id": "btask_profile1",
       },
-      background: true,
+      background: false,
     });
   });
 });
