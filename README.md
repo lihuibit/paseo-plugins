@@ -4,9 +4,9 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.2.2` |
-| `task-board`      | `0.2.0` |
-| `paseo-board` CLI | `0.1.1` |
+| `shared-assets`   | `0.2.3` |
+| `task-board`      | `0.2.1` |
+| `paseo-board` CLI | `0.1.2` |
 
 - `shared-assets`：把团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 绑定到
   Paseo Project，并投影到 Provider 原生目录。
