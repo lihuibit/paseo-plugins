@@ -11,10 +11,11 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { Icon, Modal } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Tokens } from "./tokens";
 
-type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "danger";
+type ButtonVariant =
+  "default" | "secondary" | "outline" | "ghost" | "danger" | "destructive";
 type ButtonSize = "xs" | "sm" | "md";
 
 export function Button({
@@ -52,7 +53,7 @@ export function Button({
     size === "md" ? tokens.spacing[4] : tokens.spacing[3];
   const radius = size === "md" ? tokens.radius.lg : tokens.radius.md;
   const fontSize = size === "xs" ? tokens.fontSize.sm : tokens.fontSize.base;
-  const iconSize = size === "xs" ? 12 : 14;
+  const iconSize = size === "xs" ? 12 : size === "sm" ? 14 : 16;
   const palette =
     variant === "default"
       ? {
@@ -78,11 +79,17 @@ export function Button({
                 border: tokens.colors.danger,
                 text: tokens.colors.danger,
               }
-            : {
-                background: tokens.colors.surface2,
-                border: tokens.colors.surface2,
-                text: tokens.colors.foreground,
-              };
+            : variant === "destructive"
+              ? {
+                  background: tokens.colors.danger,
+                  border: tokens.colors.danger,
+                  text: tokens.colors.accentForeground,
+                }
+              : {
+                  background: tokens.colors.surface3,
+                  border: tokens.colors.surface3,
+                  text: tokens.colors.foreground,
+                };
   return (
     <Pressable
       accessibilityRole="button"
@@ -102,7 +109,7 @@ export function Button({
           borderWidth: 1,
           borderColor: palette.border,
           backgroundColor: palette.background,
-          opacity: disabled ? 0.45 : pressed ? 0.82 : 1,
+          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
         },
         style,
       ]}
@@ -156,39 +163,6 @@ export function IconButton({
     >
       <Icon name={icon} size={16} color={tokens.colors.foreground} />
     </Pressable>
-  );
-}
-
-export function Badge({
-  label,
-  tone,
-  tokens,
-}: {
-  label: string;
-  tone?: "ok" | "warn" | "danger" | "muted";
-  tokens: Tokens;
-}) {
-  const color =
-    tone === "ok"
-      ? tokens.colors.success
-      : tone === "warn"
-        ? tokens.colors.warning
-        : tone === "danger"
-          ? tokens.colors.danger
-          : tokens.colors.foregroundMuted;
-  return (
-    <View
-      style={{
-        borderRadius: tokens.radius.full,
-        borderWidth: 1,
-        borderColor: tone === "ok" ? color : tokens.colors.border,
-        backgroundColor: tone === "ok" ? `${color}1a` : tokens.colors.surface1,
-        paddingHorizontal: tokens.spacing[2],
-        paddingVertical: 2,
-      }}
-    >
-      <Text style={{ color, fontSize: tokens.fontSize.xs }}>{label}</Text>
-    </View>
   );
 }
 
@@ -247,7 +221,7 @@ export function Checkbox({
   tokens,
   testID,
   accessibilityLabel,
-  size = 16,
+  size = 20,
 }: {
   checked: boolean;
   onPress: () => void;
@@ -266,8 +240,8 @@ export function Checkbox({
       disabled={disabled}
       onPress={onPress}
       style={{
-        width: size + 6,
-        height: size + 6,
+        width: size,
+        height: size,
         alignItems: "center",
         justifyContent: "center",
         opacity: disabled ? 0.4 : 1,
@@ -277,18 +251,18 @@ export function Checkbox({
         style={{
           width: size,
           height: size,
-          borderRadius: 3,
+          borderRadius: tokens.radius.md,
           borderWidth: 1,
-          borderColor: checked
+          borderColor: checked ? tokens.colors.accent : tokens.colors.border,
+          backgroundColor: checked
             ? tokens.colors.accent
-            : tokens.colors.foregroundMuted,
-          backgroundColor: checked ? tokens.colors.accent : "transparent",
+            : tokens.colors.surface2,
           alignItems: "center",
           justifyContent: "center",
         }}
       >
         {checked ? (
-          <Icon name="Check" size={11} color={tokens.colors.accentForeground} />
+          <Icon name="Check" size={13} color={tokens.colors.accentForeground} />
         ) : null}
       </View>
     </Pressable>
@@ -304,6 +278,7 @@ export function TextField({
   secure,
   testID,
   editable = true,
+  minHeight,
 }: {
   value: string;
   onChangeText: (value: string) => void;
@@ -313,6 +288,7 @@ export function TextField({
   secure?: boolean;
   testID?: string;
   editable?: boolean;
+  minHeight?: number;
 }) {
   const [focused, setFocused] = useState(false);
   return (
@@ -330,7 +306,8 @@ export function TextField({
       autoCorrect={false}
       testID={testID}
       style={{
-        minHeight: multiline ? 120 : tokens.control.md,
+        minHeight: multiline ? (minHeight ?? 120) : tokens.control.md,
+        ...(multiline && minHeight ? { flexGrow: 1 } : {}),
         borderWidth: 1,
         borderColor: focused ? tokens.colors.accent : tokens.colors.border,
         borderRadius: tokens.radius.md,
@@ -459,7 +436,6 @@ export function Muted({
       style={{
         color: tokens.colors.foregroundMuted,
         fontSize: tokens.fontSize.sm,
-        lineHeight: 18,
       }}
     >
       {children}
@@ -485,24 +461,11 @@ export function Mono({
       style={{
         color: tokens.colors.foreground,
         fontSize: tokens.fontSize.sm,
-        fontFamily: "monospace",
-        lineHeight: 17,
+        fontFamily: tokens.fontFamily,
       }}
     >
       {children}
     </Text>
-  );
-}
-
-export function Divider({ tokens }: { tokens: Tokens }) {
-  return (
-    <View
-      style={{
-        height: 1,
-        backgroundColor: tokens.colors.border,
-        width: "100%",
-      }}
-    />
   );
 }
 
@@ -534,15 +497,32 @@ export function Spinner({ tokens }: { tokens: Tokens }) {
   );
 }
 
-export function TabRail({ children }: { children: ReactNode }) {
+export function TabRail({
+  children,
+  tokens,
+}: {
+  children: ReactNode;
+  tokens: Tokens;
+}) {
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ gap: 4, paddingVertical: 2 }}
+    <View
+      style={{
+        flexDirection: "row",
+        gap: tokens.spacing[1],
+        borderBottomWidth: 1,
+        borderBottomColor: tokens.colors.border,
+        paddingHorizontal: tokens.spacing[4],
+        paddingTop: tokens.spacing[2],
+      }}
     >
-      {children}
-    </ScrollView>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ gap: 4, alignItems: "center" }}
+      >
+        {children}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -571,10 +551,10 @@ export function TabButton({
         flexDirection: "row",
         alignItems: "center",
         gap: 4,
-        paddingVertical: tokens.spacing[1.5],
-        paddingHorizontal: tokens.spacing[3],
-        borderRadius: tokens.radius.md,
-        backgroundColor: active ? tokens.colors.surface2 : "transparent",
+        borderBottomWidth: 2,
+        borderBottomColor: active ? tokens.colors.accent : "transparent",
+        paddingHorizontal: 12,
+        paddingVertical: 10,
       }}
     >
       <Text
@@ -582,8 +562,10 @@ export function TabButton({
           color: active
             ? tokens.colors.foreground
             : tokens.colors.foregroundMuted,
-          fontSize: tokens.fontSize.base,
-          fontWeight: active ? "600" : "normal",
+          fontSize: tokens.fontSize.sm,
+          fontWeight: active
+            ? tokens.fontWeight.semibold
+            : tokens.fontWeight.normal,
         }}
       >
         {label}
@@ -591,11 +573,11 @@ export function TabButton({
       {count ? (
         <View
           style={{
-            minWidth: 16,
-            height: 16,
-            paddingHorizontal: 4,
-            borderRadius: 8,
-            backgroundColor: tokens.colors.accent,
+            minWidth: 18,
+            height: 18,
+            paddingHorizontal: tokens.spacing[1],
+            borderRadius: tokens.radius.full,
+            backgroundColor: tokens.colors.statusDotWarning,
             alignItems: "center",
             justifyContent: "center",
           }}
@@ -603,8 +585,8 @@ export function TabButton({
           <Text
             style={{
               color: tokens.colors.accentForeground,
-              fontSize: 10,
-              fontWeight: "600",
+              fontSize: tokens.fontSize.sm,
+              fontWeight: tokens.fontWeight.medium,
             }}
           >
             {count}
@@ -615,76 +597,175 @@ export function TabButton({
   );
 }
 
-export function Dialog({
+/**
+ * The in-page overlay the AgentStorm shared-asset dialogs use. The plugin host
+ * modal has its own chrome and width, which is why the two implementations did
+ * not line up; this one lives inside the screen and can be matched exactly.
+ */
+export function Overlay({
   open,
-  onOpenChange,
-  title,
+  onClose,
   children,
-  width = 640,
+  tokens,
+  maxWidth = 520,
+  height,
+  width = "100%",
+  zIndex = 20,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
+  onClose: () => void;
   children: ReactNode;
-  width?: number;
+  tokens: Tokens;
+  maxWidth?: number;
+  height?: number | `${number}%`;
+  width?: number | `${number}%`;
+  zIndex?: number;
 }) {
+  if (!open) return null;
   return (
-    <Modal title={title} open={open} onOpenChange={onOpenChange}>
-      <Modal.Content
-        contentContainerStyle={{ width, maxWidth: "100%", gap: 12 }}
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        zIndex,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(0,0,0,0.34)",
+        padding: tokens.spacing[4],
+      }}
+      onStartShouldSetResponder={() => true}
+      onResponderRelease={onClose}
+    >
+      <View
+        style={{
+          width,
+          maxWidth,
+          ...(height ? { height } : {}),
+          overflow: "hidden",
+          borderRadius: tokens.radius.xl,
+          borderWidth: 1,
+          borderColor: tokens.colors.border,
+          backgroundColor: tokens.colors.surface1,
+        }}
+        onStartShouldSetResponder={() => true}
+        onResponderRelease={() => undefined}
       >
         {children}
-      </Modal.Content>
-    </Modal>
+      </View>
+    </View>
   );
 }
 
-export function ConfirmInline({
+export function DialogHeader({
   title,
   description,
-  confirmLabel,
-  cancelLabel,
-  onConfirm,
-  onCancel,
   tokens,
-  destructive,
+  onClose,
+  closeDisabled,
 }: {
   title: string;
-  description?: string;
-  confirmLabel: string;
-  cancelLabel: string;
-  onConfirm: () => void;
-  onCancel: () => void;
+  description?: string | null;
   tokens: Tokens;
-  destructive?: boolean;
+  onClose: () => void;
+  closeDisabled?: boolean;
 }) {
   return (
     <View
       style={{
-        gap: tokens.spacing[2],
-        borderWidth: 1,
-        borderColor: destructive ? tokens.colors.danger : tokens.colors.border,
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: tokens.spacing[3],
+      }}
+    >
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text
+          style={{
+            color: tokens.colors.foreground,
+            fontSize: tokens.fontSize.lg,
+            fontWeight: tokens.fontWeight.semibold,
+          }}
+        >
+          {title}
+        </Text>
+        {description ? (
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            {description}
+          </Text>
+        ) : null}
+      </View>
+      <Button
+        accessibilityLabel="关闭"
+        size="xs"
+        variant="ghost"
+        disabled={closeDisabled}
+        onPress={onClose}
+        tokens={tokens}
+      >
+        <Icon name="X" size={16} color={tokens.colors.foregroundMuted} />
+      </Button>
+    </View>
+  );
+}
+
+export function DialogSummary({
+  title,
+  description,
+  warning,
+  tokens,
+}: {
+  title?: string;
+  description?: string;
+  warning?: string;
+  tokens: Tokens;
+}) {
+  return (
+    <View
+      style={{
+        gap: tokens.spacing[1],
         borderRadius: tokens.radius.lg,
+        backgroundColor: tokens.colors.surface2,
         padding: tokens.spacing[3],
       }}
     >
-      <Text style={{ color: tokens.colors.foreground, fontWeight: "600" }}>
-        {title}
-      </Text>
-      {description ? <Muted tokens={tokens}>{description}</Muted> : null}
-      <View style={{ flexDirection: "row", gap: tokens.spacing[2] }}>
-        <Button
-          tokens={tokens}
-          size="xs"
-          variant={destructive ? "danger" : "default"}
-          onPress={onConfirm}
+      {title ? (
+        <Text
+          style={{
+            color: tokens.colors.accent,
+            fontSize: tokens.fontSize.sm,
+            fontWeight: tokens.fontWeight.semibold,
+          }}
         >
-          {confirmLabel}
-        </Button>
-        <Button tokens={tokens} size="xs" variant="ghost" onPress={onCancel}>
-          {cancelLabel}
-        </Button>
-      </View>
+          {title}
+        </Text>
+      ) : null}
+      {description ? (
+        <Text
+          style={{
+            color: tokens.colors.foregroundMuted,
+            fontSize: tokens.fontSize.sm,
+          }}
+        >
+          {description}
+        </Text>
+      ) : null}
+      {warning ? (
+        <Text
+          style={{
+            color: tokens.colors.warning,
+            fontSize: tokens.fontSize.sm,
+          }}
+        >
+          {warning}
+        </Text>
+      ) : null}
     </View>
   );
 }
