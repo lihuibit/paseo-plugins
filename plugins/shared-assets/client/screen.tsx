@@ -73,6 +73,7 @@ import {
   TabRail,
   TextField,
 } from "./ui/components";
+import { countDrift } from "./drift-counts";
 import { createTokens, type Tokens } from "./ui/tokens";
 
 type Tab = "skills" | "prompt" | "knowledge" | "docs";
@@ -1506,17 +1507,10 @@ function ProjectDetail({
       : kind === "skill"
         ? skillProviders
         : [];
-  const activeDrift = drift.filter((item) => !item.ignored);
-  const driftByKind = new Map<AssetKind, number>();
-  const driftByProvider = new Map<string, number>();
-  for (const item of activeDrift) {
-    driftByKind.set(item.kind, (driftByKind.get(item.kind) ?? 0) + 1);
-    if (item.kind !== kind || !item.provider) continue;
-    driftByProvider.set(
-      item.provider,
-      (driftByProvider.get(item.provider) ?? 0) + 1,
-    );
-  }
+  const { byKind: driftByKind, byProvider: driftByProvider } = countDrift(
+    drift,
+    kind,
+  );
   const allRows = relationships?.rows ?? [];
   const batchRows = allRows.filter((row) => batchSelected.has(row.id));
   const batchAddable = batchRows.filter(

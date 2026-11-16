@@ -36,6 +36,26 @@ const STATUS_ORDER: DriftStatus[] = [
   "synced",
 ];
 
+/**
+ * Drift the user still has to act on.
+ *
+ * AgentStorm's `isDriftedSyncStatus` is the reference: a `synced` copy needs no
+ * reminder, and a `missing` one is not an actionable difference either. Local
+ * assets the shared library has never seen are kept because publishing them is
+ * the user's next step.
+ */
+const ATTENTION_STATUSES: ReadonlySet<DriftStatus> = new Set([
+  "local-update",
+  "remote-update",
+  "diverged",
+  "remote-deleted",
+  "unpublished-local",
+]);
+
+export function needsAttention(status: DriftStatus): boolean {
+  return ATTENTION_STATUSES.has(status);
+}
+
 async function fileDigest(path: string): Promise<string | null> {
   try {
     return sha256(await readFile(path));
@@ -402,6 +422,7 @@ export async function listDrift(
   const items: DriftItem[] = [];
   for (const partial of partials) {
     if (!partial) continue;
+    if (!needsAttention(partial.status)) continue;
     const repositoryPath =
       partial.kind === "prompt"
         ? "AGENTS.md"

@@ -21,7 +21,6 @@ import { repoDir } from "../server/plugin-data";
 import { currentBranch, runGit } from "../server/git";
 import { readConfig, writeConfig } from "../server/registry";
 import { runAutoSync } from "../server/service";
-import { clearBaselines } from "../server/baseline";
 
 const GUIDE_BASE = "# Guide\n\none\ntwo\nthree\n";
 
@@ -74,15 +73,9 @@ beforeEach(async () => {
 });
 
 describe("drift detection", () => {
-  it("reports synced for freshly materialized files", async () => {
+  it("omits synced assets from the drift list", async () => {
     const items = await listDrift("p1", workspace);
-    const knowledge = items.find(
-      (item) => item.assetId === "knowledge/guide.md",
-    );
-    expect(knowledge?.status).toBe("synced");
-    expect(items.find((item) => item.assetId === "prompt")?.status).toBe(
-      "synced",
-    );
+    expect(items).toEqual([]);
   });
 
   it("distinguishes local-update, remote-update and diverged", async () => {
@@ -108,6 +101,7 @@ describe("drift detection", () => {
   });
 
   it("marks assets ignored by shared rules", async () => {
+    await writeFile(await localGuide(), `${GUIDE_BASE}local\n`);
     await writeFile(join(checkout, "ignore-rules"), "kind:knowledge\n");
     const items = await listDrift("p1", workspace);
     expect(
@@ -115,15 +109,10 @@ describe("drift detection", () => {
     ).toBe(true);
   });
 
-  it("drops stale baselines when a binding is cleared", async () => {
+  it("omits missing copies instead of reporting them as drift", async () => {
     await rm(await localGuide());
     await rm(await remoteGuide());
-    let items = await listDrift("p1", workspace);
-    expect(
-      items.find((item) => item.assetId === "knowledge/guide.md")?.status,
-    ).toBe("missing");
-    await clearBaselines(workspace);
-    items = await listDrift("p1", workspace);
+    const items = await listDrift("p1", workspace);
     expect(
       items.find((item) => item.assetId === "knowledge/guide.md"),
     ).toBeUndefined();

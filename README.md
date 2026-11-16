@@ -4,7 +4,7 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.2.4` |
+| `shared-assets`   | `0.2.5` |
 | `task-board`      | `0.2.1` |
 | `paseo-board` CLI | `0.1.2` |
 

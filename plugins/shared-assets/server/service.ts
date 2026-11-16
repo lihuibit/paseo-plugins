@@ -268,16 +268,14 @@ function emptyAttention(): ProjectAttention {
 }
 
 function attentionFromDrift(drift: readonly DriftItem[]): ProjectAttention {
-  const items: ProjectAttentionItem[] = drift
-    .filter((item) => item.status !== "synced")
-    .map((item) => ({
-      kind: item.kind,
-      provider: item.provider,
-      scope: item.scope,
-      name: item.name,
-      reason: item.status,
-      ignored: item.ignored,
-    }));
+  const items: ProjectAttentionItem[] = drift.map((item) => ({
+    kind: item.kind,
+    provider: item.provider,
+    scope: item.scope,
+    name: item.name,
+    reason: item.status,
+    ignored: item.ignored,
+  }));
   const active = items.filter((item) => !item.ignored);
   return {
     items,
