@@ -102,4 +102,32 @@ describe("board agent ownership", () => {
     };
     expect(Object.keys(options.metadata).length).toBeGreaterThanOrEqual(2);
   });
+
+  it("retries without background on Paseo 0.15.x", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const api = {
+      workspaces: {
+        ref: () => ({
+          refresh: async () => ({ id: "wks_1" }),
+          agents: {
+            create: async (options: Record<string, unknown>) => {
+              calls.push(options);
+              if (calls.length === 1) {
+                throw new Error(
+                  "background is workspace creation intent; configure the selected workspace at creation.",
+                );
+              }
+              return { id: "agent_retry", refresh: async () => null };
+            },
+          },
+        }),
+      },
+    } as unknown as PaseoApi;
+
+    const created = await createAgentForTask(api, task("task"), assignment);
+    expect(created.execution.agentId).toBe("agent_retry");
+    expect(calls[0]?.background).toBe(true);
+    expect(calls[1]?.background).toBeUndefined();
+    expect(calls[1]?.metadata).toBeDefined();
+  });
 });

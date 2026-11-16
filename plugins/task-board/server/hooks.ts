@@ -14,7 +14,12 @@ export function registerHooks(
 ): void {
   server.addHook("agent.create.after", async ({ agent }, context) => {
     await ensureReady(context.paseo);
-    const metadata = agent.metadata["agentstorm.task-board"];
+    // Paseo 0.15.x does not expose agent metadata in lifecycle hooks.
+    const hookMetadata = (agent as { metadata?: unknown }).metadata;
+    const metadata =
+      hookMetadata && typeof hookMetadata === "object"
+        ? (hookMetadata as Record<string, unknown>)["agentstorm.task-board"]
+        : undefined;
     if (!metadata || typeof metadata !== "object") return;
     const taskId = (metadata as Record<string, unknown>).taskId;
     if (typeof taskId === "string" && taskId.length > 0) {

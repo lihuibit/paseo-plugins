@@ -11,6 +11,7 @@
     "sync:core": "node scripts/sync-core.mjs",
     "check:core": "node scripts/sync-core.mjs --check",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck:sdk": "node scripts/check-sdk-typecheck.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

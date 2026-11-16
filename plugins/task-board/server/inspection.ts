@@ -76,7 +76,9 @@ export function summarizeAgent(agent: PaseoAgent): AgentSummary {
     lastError: agent.lastError ?? null,
     lastUsage: agent.lastUsage ?? null,
     archivedAt: agent.archivedAt ?? null,
-    background: agent.background ?? false,
+    // Paseo 0.15.x snapshots do not carry the background flag.
+    background:
+      (agent as PaseoAgent & { background?: boolean }).background ?? false,
   };
 }
 

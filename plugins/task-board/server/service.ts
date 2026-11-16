@@ -128,6 +128,12 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 export class TaskBoardService {
   private locks = new Map<string, Promise<unknown>>();
   private ready: Promise<void> | null = null;
@@ -1005,12 +1011,10 @@ export class TaskBoardService {
         model: optionalString(profile.model),
         modeId: optionalString(profile.modeId),
         thinkingOptionId: optionalString(profile.thinkingOptionId),
+        // Paseo 0.15.x profiles only carry featureValues; 0.16 adds options.
         options:
-          profile.options &&
-          typeof profile.options === "object" &&
-          !Array.isArray(profile.options)
-            ? (profile.options as Record<string, unknown>)
-            : undefined,
+          optionalRecord(profile.options) ??
+          optionalRecord(profile.featureValues),
         notes: optionalString(profile.notes),
         icon: optionalString(profile.icon),
         color: optionalString(profile.color),

@@ -103,28 +103,33 @@ export async function createAgentForTask(
 
   const agentInput = assignment.agent;
   const provider = composeProvider(agentInput.provider, agentInput.model);
-  const handle = await paseo.workspaces
-    .ref(assignment.workspaceId)
-    .agents.create({
-      config: {
-        provider,
-        modeId: agentInput.modeId,
-        thinkingOptionId: agentInput.thinkingOptionId,
-        options: agentInput.options,
-        systemPrompt: buildBoardSystemPrompt(task, options),
-      },
-      title: agentInput.title ?? `${task.displayId} ${task.title}`,
-      labels: boardLabels(task),
-      metadata: {
-        [BOARD_TASK_LABEL]: task.id,
-        [BOARD_METADATA_KEY]: {
-          taskId: task.id,
-          displayId: task.displayId,
-          pluginId: "agentstorm-task-board",
-        },
-      },
-      background: true,
-    });
+  const createOptions = {
+    config: {
+      provider,
+      modeId: agentInput.modeId,
+      thinkingOptionId: agentInput.thinkingOptionId,
+      options: agentInput.options,
+      systemPrompt: buildBoardSystemPrompt(task, options),
+    },
+    title: agentInput.title ?? `${task.displayId} ${task.title}`,
+    labels: boardLabels(task),
+    background: true,
+  };
+  // Paseo 0.15.x strips unknown create fields; 0.16 uses metadata in hooks.
+  const metadata = {
+    [BOARD_TASK_LABEL]: task.id,
+    [BOARD_METADATA_KEY]: {
+      taskId: task.id,
+      displayId: task.displayId,
+      pluginId: "agentstorm-task-board",
+    },
+  };
+  const handle = await createBoardAgent(
+    paseo,
+    assignment.workspaceId,
+    createOptions,
+    metadata,
+  );
   await handle.refresh();
 
   return {
@@ -150,6 +155,36 @@ export async function createAgentForTask(
       startedAt: new Date().toISOString(),
     },
   };
+}
+
+type AgentCreateRequest = Parameters<
+  ReturnType<PaseoApi["workspaces"]["ref"]>["agents"]["create"]
+>[0];
+
+async function createBoardAgent(
+  paseo: PaseoApi,
+  workspaceId: string,
+  options: AgentCreateRequest,
+  metadata: Record<string, unknown>,
+): Promise<PaseoAgentHandle> {
+  const agents = paseo.workspaces.ref(workspaceId).agents;
+  try {
+    return await agents.create({
+      ...options,
+      metadata,
+    } as AgentCreateRequest & { metadata: Record<string, unknown> });
+  } catch (error) {
+    // Paseo 0.15.x only accepts background when creating a new workspace.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("background is workspace creation intent")) {
+      throw error;
+    }
+    const { background: _background, ...withoutBackground } = options;
+    return agents.create({
+      ...withoutBackground,
+      metadata,
+    } as AgentCreateRequest & { metadata: Record<string, unknown> });
+  }
 }
 
 export async function executionForExistingAgent(

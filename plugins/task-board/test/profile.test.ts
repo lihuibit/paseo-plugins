@@ -88,6 +88,35 @@ describe("Paseo Agent Profiles", () => {
     ]);
   });
 
+  it("uses featureValues when the profile has no options", async () => {
+    const fake = {
+      config: {
+        get: async () => ({
+          requestId: "r1",
+          config: {
+            agentProfiles: [
+              {
+                id: "p1",
+                name: "Legacy",
+                provider: "codex",
+                featureValues: { sandbox_mode: "read-only" },
+              },
+            ],
+          },
+        }),
+      },
+    } as unknown as PaseoApi;
+    const service = new TaskBoardService(new BoardStore(), new AgentIndex());
+    await expect(service.listProfiles(fake)).resolves.toEqual([
+      {
+        id: "p1",
+        name: "Legacy",
+        provider: "codex",
+        options: { sandbox_mode: "read-only" },
+      },
+    ]);
+  });
+
   it("merges profile options into the created Agent config", async () => {
     let captured: Record<string, unknown> | null = null;
     const workspace = {

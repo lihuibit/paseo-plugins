@@ -18,9 +18,27 @@ Paseo 插件 monorepo。
 
 ## 环境要求
 
-- Paseo `>=0.16.0 <0.17.0`（清单里已锁定，实测 `0.16.0-beta.2`）
+- Paseo `>=0.15.4 <0.17.0`（清单里已锁定）
 - Node.js 20+、Git
 - Paseo daemon 已启用插件：`config.json` 中 `pluginsEnabled: true`
+
+### 支持矩阵
+
+| Paseo daemon               | 插件清单 | 实测内容                                                                                                      |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| `0.15.4`                   | 支持     | 两个插件 running；Screen/Sidebar、RPC、Agent 创建与 hooks、`board_declare`、共享资产、看板、`paseo-board` CLI |
+| `0.16.0` / `0.16.0-beta.2` | 支持     | 153 tests、`npm run e2e`、`e2e-i10`、task-board E2E                                                           |
+| `0.14.x` / `0.17.x`        | 拒绝     | 安装时返回 `requires Paseo ...`，不加载插件                                                                   |
+
+0.15.4 的兼容处理：
+
+- Agent Profile 只有 `featureValues`；插件读取 `profile.options` 时回退到
+  `featureValues`，对调用方仍返回 `options`。
+- `agent.create.after` 的 hook agent 没有 `metadata`，看板改用 `agent.open.before`
+  携带的 `agentstorm.task-id` label 完成绑定；metadata 仍会传给 0.16。
+- `background: true` 在 0.15.4 只允许用于新建 Workspace；看板在已有 Workspace 创建
+  Agent 时遇到该错误会自动去掉 `background` 重试。
+- `PaseoAgent.background` 不在 0.15.4 快照类型里，读取时按可选字段处理。
 
 ## 目录
 
@@ -262,9 +280,17 @@ I3 新增：`.providers.list`、`.drift.list`、`.diff`、`.merge.preview`、`.m
 ```bash
 npm run check:core
 npm run typecheck
+npm run typecheck:sdk       # 同时用 0.15.4 与 0.16.0-beta.2 SDK 类型检查
 npm run lint
 npm test
 npm run format:check
+```
+
+`typecheck:sdk` 在临时目录中安装指定 SDK 并通过符号链接复用本仓库依赖，不会改写
+`node_modules`。也可只跑一个版本：
+
+```bash
+node scripts/check-sdk-typecheck.mjs 0.15.4
 ```
 
 CI 复用同一组命令：
@@ -282,6 +308,9 @@ npm run format:check
 
 固定使用 `~/.paseo-plugin-test` 与 `127.0.0.1:6769`，不会读写 `~/.paseo-dev`。
 脚本结束会停止该 daemon；用户项目文件和 `plugin-data` 保留。
+
+兼容 0.15.4 时使用独立 home 与端口（例如 `~/.paseo-0154-test` / `6772`），
+不要复用 6767/6768/16768，也不要停止正式 daemon。
 
 ```bash
 # 安装 → smoke → daemon 重启 → 校验 → 卸载 → 文件保留 → 版本约束
@@ -358,6 +387,9 @@ npm run e2e:i4             # dev daemon：定时重启、recurring、permission�
 npm run e2e:i4-migrate     # 独立 home（6769）：迁移只读与 UI 种子数据
 ```
 
+I12 的 0.15.4 正式版兼容证据（含 0.16.0 回归）在 AgentStorm 仓库：
+`docs/plugins/evidence/implementation/I12/`。
+
 ### 看板 CLI（外部 Agent）
 
 `paseo-board` 让普通 shell 和外部 Agent 直接管理看板，不需要 MCP，调用方也
@@ -383,6 +415,9 @@ paseo-board create "拆解发布任务" --kind task-planning --json
 `PASEO_BOARD_PASSWORD` 或 `--password`。完整命令、Claude Code
 `Bash(paseo-board:*)` 示例和 Agent 工具对照见
 [`packages/board-cli/README.md`](packages/board-cli/README.md)。
+
+CLI 固定使用 `@getpaseo/client@0.16.0-beta.2`，已实测可调用 0.15.4 daemon 的
+plugin RPC；`list/status/logs/create/assign/start/stop/done` 均通过。
 
 外部 Claude Code 只需再加一条 Bash allowlist，不需要 MCP 或插件：
 

@@ -8,7 +8,7 @@ Agent 主动调用的 `board_declare` 工具，以及定时/周期、WeCom 通�
 
 ## 环境要求
 
-- Paseo `>=0.16.0 <0.17.0`（实测 `0.16.0-beta.2`）
+- Paseo `>=0.15.4 <0.17.0`（实测 `0.15.4`、`0.16.0-beta.2`）
 - 宿主 `config.json` 中 `pluginsEnabled: true`
 - Agent 主动声明需要宿主开启 `daemon.mcp.injectIntoAgents: true`。未开启时看板顶部
   显示黄色横幅，状态只能由 hooks 推断。
