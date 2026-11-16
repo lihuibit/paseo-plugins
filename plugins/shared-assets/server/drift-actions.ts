@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { recordBaselineFromFile } from "./baseline";
 import { resolveState } from "./asset-state";
@@ -10,13 +10,21 @@ export async function overwriteDrift(input: {
   assetId: string;
   path?: string;
   provider?: string;
-}): Promise<{ updatedFiles: string[]; keptFiles: string[] }> {
+}): Promise<{
+  updatedFiles: string[];
+  keptFiles: string[];
+  removedFiles: string[];
+}> {
   const state = await resolveState(input);
   const updatedFiles: string[] = [];
   const keptFiles: string[] = [];
+  const removedFiles: string[] = [];
   for (const file of state.files) {
     if (!(await fileExists(file.file.remotePath))) {
-      keptFiles.push(file.file.localPath);
+      // The shared copy does not have this file, so discarding the local
+      // change means removing the local-only file rather than keeping it.
+      await rm(file.file.localPath, { force: true });
+      removedFiles.push(file.file.localPath);
       continue;
     }
     const buffer = await readFile(file.file.remotePath);
@@ -32,5 +40,5 @@ export async function overwriteDrift(input: {
     });
     updatedFiles.push(file.file.localPath);
   }
-  return { updatedFiles, keptFiles };
+  return { updatedFiles, keptFiles, removedFiles };
 }

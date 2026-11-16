@@ -3052,12 +3052,7 @@ function SyncStatusPill({
   status: AssetRelationshipRow["syncStatus"];
   tokens: Tokens;
 }) {
-  if (
-    !status ||
-    status === "synced" ||
-    status === "unpublished-local" ||
-    status === "missing"
-  ) {
+  if (!status || status === "synced" || status === "missing") {
     return null;
   }
   const style =
@@ -3077,21 +3072,29 @@ function SyncStatusPill({
             icon: "UploadCloud",
             label: "本地有未发布修改",
           }
-        : status === "diverged"
+        : status === "unpublished-local"
           ? {
-              borderColor: "rgba(248, 81, 73, 0.4)",
-              backgroundColor: "rgba(248, 81, 73, 0.1)",
-              color: tokens.colors.danger,
-              icon: "X",
-              label: "共享端与本地均有修改",
+              borderColor: "rgba(210, 153, 34, 0.4)",
+              backgroundColor: "rgba(210, 153, 34, 0.12)",
+              color: tokens.colors.warning,
+              icon: "UploadCloud",
+              label: "本地有未发布内容",
             }
-          : {
-              borderColor: "rgba(248, 81, 73, 0.4)",
-              backgroundColor: "rgba(248, 81, 73, 0.1)",
-              color: tokens.colors.danger,
-              icon: "X",
-              label: "共享仓库已删除，本地副本仍保留",
-            };
+          : status === "diverged"
+            ? {
+                borderColor: "rgba(248, 81, 73, 0.4)",
+                backgroundColor: "rgba(248, 81, 73, 0.1)",
+                color: tokens.colors.danger,
+                icon: "X",
+                label: "共享端与本地均有修改",
+              }
+            : {
+                borderColor: "rgba(248, 81, 73, 0.4)",
+                backgroundColor: "rgba(248, 81, 73, 0.1)",
+                color: tokens.colors.danger,
+                icon: "X",
+                label: "共享仓库已删除，本地副本仍保留",
+              };
   return (
     <View
       style={{
@@ -3243,6 +3246,8 @@ function RelationshipRow({
     row.relationship === "linked" && syncStatus === "local-update";
   const isRemoteDeleted =
     row.relationship === "linked" && syncStatus === "remote-deleted";
+  const isUnpublishedLocal =
+    row.relationship === "linked" && syncStatus === "unpublished-local";
   const isPrivate = row.relationship === "private";
   const isCandidate = row.relationship === "candidate";
   const isSharedOnly = row.relationship === "shared-only";
@@ -3252,7 +3257,8 @@ function RelationshipRow({
     !isRemoteUpdate &&
     !isDiverged &&
     !isLocalUpdate &&
-    !isRemoteDeleted;
+    !isRemoteDeleted &&
+    !isUnpublishedLocal;
   const localDetail = !local
     ? ""
     : isPrivate
@@ -3260,7 +3266,9 @@ function RelationshipRow({
       : isCandidate
         ? `将更新同名共享 ${KIND_LABELS[local.kind]}`
         : row.relationship === "linked"
-          ? `将更新已关联的共享 ${KIND_LABELS[local.kind]}`
+          ? isUnpublishedLocal
+            ? "尚未同步到共享库"
+            : `将更新已关联的共享 ${KIND_LABELS[local.kind]}`
           : "";
 
   const sharedCard = shared ? (
@@ -3413,14 +3421,18 @@ function RelationshipRow({
             ? "rgba(248, 81, 73, 0.62)"
             : isLocalUpdate
               ? "rgba(210, 153, 34, 0.62)"
-              : tokens.colors.border,
+              : isUnpublishedLocal
+                ? "rgba(210, 153, 34, 0.42)"
+                : tokens.colors.border,
         backgroundColor: selected
           ? tokens.colors.surface2
           : isDiverged || isRemoteDeleted
             ? "rgba(248, 81, 73, 0.07)"
             : isLocalUpdate
               ? "rgba(210, 153, 34, 0.08)"
-              : tokens.colors.surface1,
+              : isUnpublishedLocal
+                ? "rgba(210, 153, 34, 0.05)"
+                : tokens.colors.surface1,
         borderRadius: tokens.radius.lg,
         padding: tokens.spacing[3],
       }}
@@ -3504,7 +3516,9 @@ function RelationshipRow({
         ) : null}
         <SyncStatusPill
           status={
-            isLocalUpdate || isDiverged || isRemoteDeleted ? syncStatus : null
+            isLocalUpdate || isDiverged || isRemoteDeleted || isUnpublishedLocal
+              ? syncStatus
+              : null
           }
           tokens={tokens}
         />
@@ -3706,11 +3720,17 @@ function RelationshipRow({
             移除关联
           </Button>
         </>
-      ) : isLocalUpdate || isDiverged ? (
+      ) : isLocalUpdate || isDiverged || isUnpublishedLocal ? (
         <>
           <RelationPill
             tokens={tokens}
-            label={isDiverged ? "双方均有修改" : "本地 → 共享"}
+            label={
+              isDiverged
+                ? "双方均有修改"
+                : isUnpublishedLocal
+                  ? "本地有未发布内容"
+                  : "本地 → 共享"
+            }
             icon={isDiverged ? "X" : "UploadCloud"}
             tone={isDiverged ? "diverged" : "local"}
           />
@@ -3727,9 +3747,11 @@ function RelationshipRow({
               合并修改
             </Button>
           ) : null}
-          <Button tokens={tokens} size="xs" variant="ghost" onPress={onDiff}>
-            查看差异
-          </Button>
+          {isUnpublishedLocal ? null : (
+            <Button tokens={tokens} size="xs" variant="ghost" onPress={onDiff}>
+              查看差异
+            </Button>
+          )}
           <Button
             tokens={tokens}
             size="xs"

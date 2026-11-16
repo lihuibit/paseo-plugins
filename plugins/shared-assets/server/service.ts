@@ -1106,6 +1106,7 @@ export function registerHandlers(server: PluginServerContext): void {
           action: input.action,
           updatedFiles: [],
           keptFiles: [resolved.targetPath],
+          removedFiles: [],
           items: await listDrift(input.projectId, workspace),
         };
       });

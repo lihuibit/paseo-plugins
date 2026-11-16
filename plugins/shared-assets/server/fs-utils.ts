@@ -12,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { isContainedPath } from "../shared/core/paths";
+import { isContainedPath, isCredentialPath } from "../shared/core/paths";
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_PACKAGE_BYTES = 40 * 1024 * 1024;
@@ -85,17 +85,19 @@ export async function scanFiles(
         continue;
       }
       if (!entry.isFile()) continue;
+      // Credentials never belong to a shareable asset: they must not be
+      // counted, projected, diffed or published as one.
+      const relativePath = relative(root, absolute).split("\\").join("/");
+      if (isCredentialPath(relativePath)) continue;
       const info = await stat(absolute);
       if (info.size > maxFileBytes) {
-        throw new Error(
-          `file exceeds ${maxFileBytes} bytes: ${relative(root, absolute)}`,
-        );
+        throw new Error(`file exceeds ${maxFileBytes} bytes: ${relativePath}`);
       }
       total += info.size;
       if (total > maxBytes)
         throw new Error(`package exceeds ${maxBytes} bytes`);
       files.push({
-        path: relative(root, absolute).split("\\").join("/"),
+        path: relativePath,
         size: info.size,
       });
       if (files.length > maxFiles)

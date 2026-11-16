@@ -1,6 +1,6 @@
 # Shared Assets (Paseo plugin)
 
-版本：`0.2.5`。`skills/global` 移除属于 breaking change，升级前请阅读本节。
+版本：`0.2.6`。`skills/global` 移除属于 breaking change，升级前请阅读本节。
 
 团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 的项目级投影。
 共享库只支持 `skills/project/<name>/`；`skills/global/` 已废弃，即使目录存在也不会
@@ -25,6 +25,8 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
      「使用共享版本」建立关联（adopt）。
    - 已关联资产按 `synced / remote-update / local-update / diverged / remote-deleted`
      展示，并支持同步到本地、选择发布、三方合并、放弃本地修改。
+   - 只有本地、尚未进入共享库的资产显示为 `unpublished-local`，卡片会提示
+     「本地有未发布内容」，可「选择发布」「放弃本地修改」或「移除关联」。
    - 「移除关联」可选择是否同时删除本地受管副本；有未保存修改时先给出警告。
    - 批量模式支持批量关联、批量同步、批量发布和批量解除关联。
 6. 每个资产 tab 底部固定发布栏显示「已选择 N 项本地 <资产类型>」，可全选可发布项并
@@ -34,6 +36,9 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
    查看/恢复项目级已忽略项、预览/执行 `.agentstorm/` 迁移、查看 Provider 矩阵。
 
 发布不会自动 push，提交后用 `git push` 推送。
+
+`.env`、`.env.*`、`.npmrc`、`.pypirc`、`id_rsa`、`*.pem`、`*.key` 等凭据文件
+不会出现在扫描、投影、drift、发布预览或提交中，显式指定这些路径发布会被拒绝。
 
 ## 数据
 

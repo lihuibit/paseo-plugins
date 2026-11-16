@@ -835,6 +835,7 @@ export const driftResolveRpc = defineRpc({
       action: z.enum(["overwrite", "keep"]),
       updatedFiles: z.array(z.string()),
       keptFiles: z.array(z.string()),
+      removedFiles: z.array(z.string()),
       items: z.array(DriftItemSchema),
     }),
   ),
