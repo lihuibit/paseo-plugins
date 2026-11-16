@@ -1,6 +1,6 @@
 {
-  "name": "@agentstorm/board-cli",
-  "version": "0.1.2",
+  "name": "@paseo-plugins/board-cli",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Command line client for the Paseo task board plugin",

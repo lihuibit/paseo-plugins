@@ -87,9 +87,9 @@ function agentSnapshot(id: string, overrides: Record<string, unknown> = {}) {
     background: true,
     title: "child agent",
     labels: {
-      "agentstorm.board": "1",
-      "agentstorm.board-admin": "1",
-      "agentstorm.task-id": "btask_child",
+      "paseo.board": "1",
+      "paseo.board-admin": "1",
+      "paseo.task-id": "btask_child",
     },
     ...overrides,
   };
@@ -211,8 +211,8 @@ function fakePaseo(
 function context(
   paseo: PaseoApi,
   labels: Record<string, string> = {
-    "agentstorm.board": "1",
-    "agentstorm.board-admin": "1",
+    "paseo.board": "1",
+    "paseo.board-admin": "1",
   },
 ): AgentToolContext {
   return {
@@ -282,12 +282,17 @@ describe("board tools", () => {
     const declare = createBoardDeclareTool(service);
     const admin = createBoardAdminTools(service);
     const adminNames = toolsForLabels(
-      { "agentstorm.board": "1", "agentstorm.board-admin": "1" },
+      { "paseo.board": "1", "paseo.board-admin": "1" },
       declare,
       admin,
     ).map((entry) => entry.name);
     const workerNames = toolsForLabels(
-      { "agentstorm.board": "1" },
+      { "paseo.board": "1" },
+      declare,
+      admin,
+    ).map((entry) => entry.name);
+    const legacyAdminNames = toolsForLabels(
+      { "agentstorm.board": "1", "agentstorm.board-admin": "1" },
       declare,
       admin,
     ).map((entry) => entry.name);
@@ -307,12 +312,13 @@ describe("board tools", () => {
       ]),
     );
     expect(workerNames).toEqual(["board_declare"]);
+    expect(legacyAdminNames).toEqual(adminNames);
   });
 
   it("rejects management tools for a non-admin agent", async () => {
     const service = new TaskBoardService(new BoardStore(), new AgentIndex());
     const { paseo } = fakePaseo({
-      adminLabels: { "agentstorm.board": "1" },
+      adminLabels: { "paseo.board": "1" },
     });
     const def = createBoardAdminTools(service).find(
       (entry) => entry.name === "board_list",
@@ -320,6 +326,21 @@ describe("board tools", () => {
     const result = await def.execute({}, context(paseo));
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ code: "E_FORBIDDEN" });
+  });
+
+  it("accepts legacy admin labels", async () => {
+    const service = new TaskBoardService(new BoardStore(), new AgentIndex());
+    const { paseo } = fakePaseo({
+      adminLabels: {
+        "agentstorm.board": "1",
+        "agentstorm.board-admin": "1",
+      },
+    });
+    const def = createBoardAdminTools(service).find(
+      (entry) => entry.name === "board_list",
+    )!;
+    const result = await def.execute({}, context(paseo));
+    expect(result.isError).not.toBe(true);
   });
 
   it("returns readable errors for unknown cards", async () => {

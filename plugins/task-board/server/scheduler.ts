@@ -93,7 +93,7 @@ export class SchedulerLock {
     const now = this.now();
     const stamp = new Date(now).toISOString();
     const payload: SchedulerLockFile = {
-      pluginId: "agentstorm-task-board",
+      pluginId: "paseo-task-board",
       instanceId: this.instanceId,
       pid: process.pid,
       acquiredAt: stamp,
@@ -157,7 +157,7 @@ export class SchedulerLock {
     }
     const stamp = new Date(now).toISOString();
     await atomicWriteLock({
-      pluginId: "agentstorm-task-board",
+      pluginId: "paseo-task-board",
       instanceId: this.instanceId,
       pid: process.pid,
       acquiredAt: current.acquiredAt,

@@ -1,7 +1,7 @@
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { BoardApiError, ConnectionError } from "./errors.js";
 
-export const PLUGIN_ID = "agentstorm-task-board";
+export const PLUGIN_ID = "paseo-task-board";
 
 export interface BoardRpcClient {
   call(method: string, input: unknown): Promise<unknown>;

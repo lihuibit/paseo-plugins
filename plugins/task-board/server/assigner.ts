@@ -123,7 +123,7 @@ export async function createAgentForTask(
     [BOARD_METADATA_KEY]: {
       taskId: task.id,
       displayId: task.displayId,
-      pluginId: "agentstorm-task-board",
+      pluginId: "paseo-task-board",
     },
   };
   const handle = await createBoardAgent(

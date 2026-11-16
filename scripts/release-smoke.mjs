@@ -52,35 +52,31 @@ async function seed() {
   requireEnv("PASEO_RELEASE_TEAM_REPO", teamRepo);
 
   const projects = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.projects.list",
   );
   const project = projects.find((entry) => entry.projectId === projectId);
   if (!project)
     throw new Error(`Project not found in clean home: ${projectId}`);
   if (project.bound) {
-    await call("agentstorm-shared-assets", "shared-assets.unbind", {
+    await call("paseo-shared-assets", "shared-assets.unbind", {
       projectId,
       force: true,
     });
   }
 
-  await call("agentstorm-shared-assets", "shared-assets.configure", {
+  await call("paseo-shared-assets", "shared-assets.configure", {
     projectId,
     repoUrl: teamRepo,
     branch: null,
     syncMode: "manual",
     trustConfirmed: true,
   });
-  const status = await call(
-    "agentstorm-shared-assets",
-    "shared-assets.status",
-    {
-      projectId,
-    },
-  );
+  const status = await call("paseo-shared-assets", "shared-assets.status", {
+    projectId,
+  });
   const assets = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.assets.list",
     {
       projectId,
@@ -88,7 +84,7 @@ async function seed() {
   );
 
   for (const assetId of ["skill:project/code-review"]) {
-    await call("agentstorm-shared-assets", "shared-assets.skills.set-enabled", {
+    await call("paseo-shared-assets", "shared-assets.skills.set-enabled", {
       projectId,
       workspaceId,
       assetId,
@@ -96,18 +92,14 @@ async function seed() {
       enabled: true,
     });
   }
-  await call(
-    "agentstorm-shared-assets",
-    "shared-assets.instructions.set-enabled",
-    {
-      projectId,
-      workspaceId,
-      provider: "both",
-      enabled: true,
-    },
-  );
+  await call("paseo-shared-assets", "shared-assets.instructions.set-enabled", {
+    projectId,
+    workspaceId,
+    provider: "both",
+    enabled: true,
+  });
   const skills = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.skills.list",
     {
       projectId,
@@ -115,12 +107,12 @@ async function seed() {
     },
   );
   const instructions = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.instructions.status",
     { projectId, workspaceId },
   );
 
-  const created = await call("agentstorm-task-board", "task-board.create", {
+  const created = await call("paseo-task-board", "task-board.create", {
     title: `I5 release smoke ${new Date().toISOString()}`,
     description:
       "Created by scripts/release-smoke.mjs; survives upgrade and restart.",
@@ -128,14 +120,14 @@ async function seed() {
     projectId,
   });
   const scheduledRunAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  const scheduled = await call("agentstorm-task-board", "task-board.create", {
+  const scheduled = await call("paseo-task-board", "task-board.create", {
     title: `I5 scheduled probe ${scheduledRunAt}`,
     description: "Scheduled trigger must survive upgrade and daemon restart.",
     labels: ["i5-release", "i5-scheduled"],
     projectId,
     trigger: { kind: "scheduled", runAt: scheduledRunAt },
   });
-  const recurring = await call("agentstorm-task-board", "task-board.create", {
+  const recurring = await call("paseo-task-board", "task-board.create", {
     title: "I5 recurring probe",
     description: "Recurring trigger must survive upgrade and daemon restart.",
     labels: ["i5-release", "i5-recurring"],
@@ -145,7 +137,7 @@ async function seed() {
       cadence: { type: "every", everyMs: 3_600_000 },
     },
   });
-  const health = await call("agentstorm-task-board", "task-board.health", {});
+  const health = await call("paseo-task-board", "task-board.health", {});
 
   const projections = [];
   for (const projection of skills.projections) {
@@ -189,22 +181,18 @@ async function seed() {
 
 async function verify() {
   const state = JSON.parse(await readFile(statePath, "utf8"));
-  const status = await call(
-    "agentstorm-shared-assets",
-    "shared-assets.status",
-    {
-      projectId: state.projectId,
-    },
-  );
+  const status = await call("paseo-shared-assets", "shared-assets.status", {
+    projectId: state.projectId,
+  });
   const assets = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.assets.list",
     {
       projectId: state.projectId,
     },
   );
   const skills = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.skills.list",
     {
       projectId: state.projectId,
@@ -212,20 +200,20 @@ async function verify() {
     },
   );
   const instructions = await call(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     "shared-assets.instructions.status",
     { projectId: state.projectId, workspaceId: state.workspaceId },
   );
-  const card = await call("agentstorm-task-board", "task-board.get", {
+  const card = await call("paseo-task-board", "task-board.get", {
     taskId: state.cardId,
   });
-  const scheduled = await call("agentstorm-task-board", "task-board.get", {
+  const scheduled = await call("paseo-task-board", "task-board.get", {
     taskId: state.scheduledCardId,
   });
-  const recurring = await call("agentstorm-task-board", "task-board.get", {
+  const recurring = await call("paseo-task-board", "task-board.get", {
     taskId: state.recurringCardId,
   });
-  const health = await call("agentstorm-task-board", "task-board.health", {});
+  const health = await call("paseo-task-board", "task-board.health", {});
 
   const projections = [];
   for (const projection of skills.projections) {

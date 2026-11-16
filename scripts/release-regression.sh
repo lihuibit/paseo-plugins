@@ -98,7 +98,7 @@ test -f "$PROJECT_DIR/.codex/skills/code-review/SKILL.md"
 test -f "$PROJECT_DIR/.claude/skills/code-review/SKILL.md"
 test ! -f "$PROJECT_DIR/.codex/skills/writing/SKILL.md"
 test ! -f "$PROJECT_DIR/.claude/skills/writing/SKILL.md"
-test -f "$HOME_DIR/plugin-data/agentstorm-task-board/tasks.json"
+test -f "$HOME_DIR/plugin-data/paseo-task-board/tasks.json"
 
 echo "== version constraint =="
 "$ROOT/scripts/check-version-constraint.sh" | tee "$EVIDENCE/version-constraint.txt"

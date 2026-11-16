@@ -9,7 +9,7 @@ const workspaceId = process.env.E2E_WORKSPACE_ID ?? "wks_67a40b3951690da8";
 const provider = process.env.E2E_PROVIDER ?? "codex";
 const model = process.env.E2E_MODEL ?? "workbuddy/hy4flash-dev";
 const modeId = process.env.E2E_MODE ?? "full-access";
-const pluginId = "agentstorm-task-board";
+const pluginId = "paseo-task-board";
 const reportPath = process.env.E2E_REPORT ?? null;
 
 const password = (await readFile(`${home}/local-credential`, "utf8")).trim();
@@ -100,9 +100,9 @@ async function main() {
     revision: assigned.task.revision,
     agentId: assigned.task.execution?.agentId,
     labels: {
-      "agentstorm.board": "1",
-      "agentstorm.task-id": task.id,
-      "agentstorm.kind": "task",
+      "paseo.board": "1",
+      "paseo.task-id": task.id,
+      "paseo.kind": "task",
     },
     background: false,
   };

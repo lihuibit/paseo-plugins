@@ -54,7 +54,11 @@ import {
   preferredTaskForAgent,
   taskIdFromAgent,
 } from "../shared/core/board/agent-index";
-import { isTerminalStatus } from "../shared/core/board/types";
+import {
+  BOARD_TASK_LABEL,
+  isTerminalStatus,
+  LEGACY_BOARD_TASK_LABEL,
+} from "../shared/core/board/types";
 import {
   createAgentForTask,
   executionForExistingAgent,
@@ -66,6 +70,7 @@ import { rebuildFromPaseo } from "./agent-index";
 import type { AgentIndex } from "./agent-index";
 import { readAgentSummary, type AgentSummary } from "./inspection";
 import {
+  ensureDataDir,
   legacyTasksPath,
   migrationsPath,
   pluginDataDir,
@@ -154,6 +159,7 @@ export class TaskBoardService {
   initialize(paseo: PaseoApi): Promise<void> {
     if (!this.ready) {
       this.ready = (async () => {
+        await ensureDataDir();
         await this.store.load();
         await this.index.load();
         await this.settings.load();
@@ -1235,7 +1241,7 @@ export class TaskBoardService {
   }
 
   async bindAgentFromOpen(agentId: string, labels: Record<string, string>) {
-    const taskId = labels["agentstorm.task-id"];
+    const taskId = labels[BOARD_TASK_LABEL] ?? labels[LEGACY_BOARD_TASK_LABEL];
     if (!taskId) return;
     const document = await this.store.read();
     const currentId = this.index.taskIdFor(agentId);

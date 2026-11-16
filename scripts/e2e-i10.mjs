@@ -13,10 +13,8 @@ const projectId = process.env.E2E_PROJECT_ID ?? "prj_a8ff4ccb22d60287";
 const workspaceId = process.env.E2E_WORKSPACE_ID ?? "wks_de5b6f178e4150c4";
 const bare = process.env.E2E_BARE ?? join(root, ".e2e/team.git");
 const demo = process.env.E2E_DEMO ?? join(root, ".e2e/demo-project");
-const out =
-  process.env.E2E_OUT ??
-  "/home/ubuntu/lihui/code/funny_projects/agentstorm/docs/plugins/evidence/implementation/I10/e2e-i10.json";
-const pluginId = "agentstorm-shared-assets";
+const out = process.env.E2E_OUT ?? join(root, ".e2e/evidence/I10/e2e-i10.json");
+const pluginId = "paseo-shared-assets";
 const checkout = join(home, "plugin-data", pluginId, "repos", projectId);
 const configPath = join(home, "plugin-data", pluginId, "config.json");
 const evidence = {

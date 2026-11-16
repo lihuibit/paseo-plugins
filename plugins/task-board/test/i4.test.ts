@@ -158,7 +158,7 @@ describe("settings and notifications", () => {
     expect(value.wecom.webhookUrl).toBe("https://example.com/hook");
     const raw = JSON.parse(
       await readFile(
-        join(home, "plugin-data/agentstorm-task-board/settings.json"),
+        join(home, "plugin-data/paseo-task-board/settings.json"),
         "utf8",
       ),
     ) as { wecom: { webhookUrl: string } };

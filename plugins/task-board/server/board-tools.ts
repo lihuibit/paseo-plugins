@@ -8,6 +8,7 @@ import { z } from "zod";
 import { BoardError } from "../shared/core/board/errors";
 import {
   BOARD_ADMIN_LABEL,
+  LEGACY_BOARD_ADMIN_LABEL,
   BoardPrioritySchema,
   BoardStatusSchema,
   BoardTaskKindSchema,
@@ -83,7 +84,10 @@ async function requireAdmin(context: AgentToolContext): Promise<void> {
       { agentId: context.agent.id },
     );
   }
-  if (refreshed.agent.labels?.[BOARD_ADMIN_LABEL] !== "1") {
+  if (
+    refreshed.agent.labels?.[BOARD_ADMIN_LABEL] !== "1" &&
+    refreshed.agent.labels?.[LEGACY_BOARD_ADMIN_LABEL] !== "1"
+  ) {
     throw new BoardError("E_FORBIDDEN", "This agent is not a board admin", {
       agentId: context.agent.id,
     });
@@ -796,7 +800,10 @@ export function toolsForLabels(
   declareTool: AgentToolDefinition,
   adminTools: AgentToolDefinition[],
 ): AgentToolDefinition[] {
-  if (labels[BOARD_ADMIN_LABEL] === "1") {
+  if (
+    labels[BOARD_ADMIN_LABEL] === "1" ||
+    labels[LEGACY_BOARD_ADMIN_LABEL] === "1"
+  ) {
     return [...adminTools, declareTool];
   }
   return [declareTool];

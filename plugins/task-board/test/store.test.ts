@@ -27,7 +27,7 @@ describe("task board persistence", () => {
 
     const raw = JSON.parse(
       await readFile(
-        join(home, "plugin-data/agentstorm-task-board/tasks.json"),
+        join(home, "plugin-data/paseo-task-board/tasks.json"),
         "utf8",
       ),
     ) as { tasks: Array<{ id: string }> };

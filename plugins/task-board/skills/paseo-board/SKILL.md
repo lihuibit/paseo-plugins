@@ -35,7 +35,7 @@ npm install -g ./packages/board-cli --prefix /tmp/paseo-board
 export PATH="/tmp/paseo-board/bin:$PATH"
 ```
 
-The Paseo daemon must have the `agentstorm-task-board` plugin installed and
+The Paseo daemon must have the `paseo-task-board` plugin installed and
 enabled. The caller does not install the plugin and does not need an MCP
 server.
 

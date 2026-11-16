@@ -12,7 +12,7 @@ const workspaceId = process.env.E2E_WORKSPACE_ID ?? "wks_de5b6f178e4150c4";
 const bare = process.env.E2E_BARE ?? join(root, ".e2e/team.git");
 const origin = process.env.E2E_ORIGIN ?? join(root, ".e2e/team-origin");
 const demo = process.env.E2E_DEMO ?? join(root, ".e2e/demo-project");
-const pluginId = "agentstorm-shared-assets";
+const pluginId = "paseo-shared-assets";
 const checkout = join(home, "plugin-data", pluginId, "repos", projectId);
 const evidence = { steps: [], assertions: {} };
 

@@ -1,6 +1,6 @@
-# Task Board（`agentstorm-task-board`）
+# Task Board（`paseo-task-board`）
 
-版本：`0.2.3`。
+版本：`0.3.0`。
 
 Paseo 任务看板插件：卡片、分配 Agent、启动/停止、生命周期 hooks 驱动状态、
 Agent 主动调用的 `board_declare` 工具，以及定时/周期、WeCom 通知、父子任务和
@@ -27,19 +27,19 @@ paseo plugin ls --home ~/.paseo-dev
 修改代码后：
 
 ```bash
-paseo plugin reload agentstorm-task-board --home ~/.paseo-dev
+paseo plugin reload paseo-task-board --home ~/.paseo-dev
 ```
 
-卸载只删除 Paseo 的插件注册，保留 `plugin-data/agentstorm-task-board/`：
+卸载只删除 Paseo 的插件注册，保留 `plugin-data/paseo-task-board/`：
 
 ```bash
-paseo plugin remove agentstorm-task-board --home ~/.paseo-dev
+paseo plugin remove paseo-task-board --home ~/.paseo-dev
 ```
 
 ## 数据目录
 
 ```text
-$PASEO_HOME/plugin-data/agentstorm-task-board/
+$PASEO_HOME/plugin-data/paseo-task-board/
 ├── tasks.json          # { version, nextNumber, tasks[] }
 ├── agentIndex.json     # agentId -> taskId
 ├── events.jsonl        # hook / 声明 / 状态事件
@@ -52,6 +52,20 @@ $PASEO_HOME/plugin-data/agentstorm-task-board/
 
 `tasks.json` 每次写入走串行队列 + 临时文件原子替换。插件重启后从磁盘恢复卡片和绑定；
 没有 label 的 Agent 不会进入索引。
+
+### 从 `agentstorm-task-board` 升级
+
+0.3.0 起 plugin id 改为 `paseo-task-board`。先移除旧注册，再安装新插件：
+
+```bash
+paseo plugin remove agentstorm-task-board --home ~/.paseo-dev
+paseo plugin install "$PWD/plugins/task-board" --home ~/.paseo-dev
+```
+
+旧 `plugin-data/agentstorm-task-board/` 会保留；新插件首次启动时如果
+`plugin-data/paseo-task-board/` 不存在，会递归复制旧目录（tasks、settings、
+bindings、events 等）。新目录已存在时不合并。旧 Agent 上的 `agentstorm.*`
+labels/metadata 继续被读取，新 Agent 只写 `paseo.*`。
 
 ## RPC
 
@@ -120,10 +134,11 @@ cp -r skills/paseo-board ~/.codex/skills/
 
 ## Agent 归属与 hooks
 
-- 创建 Agent 时写入 label：`agentstorm.board=1`、`agentstorm.task-id=<btask>`、
-  `agentstorm.kind=task`。
-- 同时写入 metadata `agentstorm.task-board.taskId`。`agent.turn.*` 载荷不含 labels，
+- 创建 Agent 时写入 label：`paseo.board=1`、`paseo.task-id=<btask>`、
+  `paseo.kind=task`。
+- 同时写入 metadata `paseo.task-board.taskId`。`agent.turn.*` 载荷不含 labels，
   因此 hook 先用 `agentIndex.json`，再用 metadata 兜底。
+- 读取时同时接受 legacy `agentstorm.*` labels/metadata，旧 Agent 不需要重建。
 - 只处理 `execution.agentId` 与事件 Agent 一致的卡片；用户自己的 Agent 不进入索引。
 - `agent.turn.before`：`todo` / `in_review` / `blocked` → `in_progress`，清理旧声明。
 - `agent.turn.after`：`completed` → `in_review`；`failed` → `blocked(agent_error)`；
@@ -175,7 +190,7 @@ cp -r skills/paseo-board ~/.codex/skills/
 
 ## `board_declare`
 
-通过 `agent.open.before` 附加到带 `agentstorm.board=1` 的会话，不建 MCP server。
+通过 `agent.open.before` 附加到带 `paseo.board=1` 的会话，不建 MCP server。
 
 | kind       | 效果                                       |
 | ---------- | ------------------------------------------ |
@@ -192,13 +207,13 @@ cp -r skills/paseo-board ~/.codex/skills/
 `kind=task-planning` 的卡片会创建一个规划 Agent。它默认带以下 label：
 
 ```text
-agentstorm.board=1
-agentstorm.board-admin=1
-agentstorm.kind=task-planning
-agentstorm.task-id=<btask_id>
+paseo.board=1
+paseo.board-admin=1
+paseo.kind=task-planning
+paseo.task-id=<btask_id>
 ```
 
-`agent.open.before` 按 label 注入工具：`agentstorm.board-admin=1` 的 Agent 获得全部
+`agent.open.before` 按 label 注入工具：`paseo.board-admin=1` 的 Agent 获得全部
 `board_*` 管理工具，普通 worker 仍然只有 `board_declare`。
 
 | 类别 | 工具                                                                                                                                                             |

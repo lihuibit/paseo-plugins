@@ -9,7 +9,7 @@ check_range() {
   local range="$1"
   cat >"$TMP/paseo-plugin.json" <<JSON
 {
-  "id": "agentstorm-version-probe",
+  "id": "paseo-version-probe",
   "name": "Version probe",
   "requirements": { "paseo": "$range" }
 }
@@ -23,7 +23,7 @@ JSON
   echo "$OUTPUT"
   if [ "$STATUS" -eq 0 ]; then
     echo "FAIL: incompatible requirements.paseo $range was accepted" >&2
-    paseo plugin remove agentstorm-version-probe --home "$HOME_DIR" >/dev/null 2>&1 || true
+    paseo plugin remove paseo-version-probe --home "$HOME_DIR" >/dev/null 2>&1 || true
     exit 1
   fi
   if ! grep -q "requires Paseo $range" <<<"$OUTPUT"; then

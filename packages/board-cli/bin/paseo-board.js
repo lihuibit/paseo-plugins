@@ -11,7 +11,7 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(
-    `paseo-board: CLI is not built (${message}). Run "npm run build --workspace @agentstorm/board-cli".`,
+    `paseo-board: CLI is not built (${message}). Run "npm run build --workspace @paseo-plugins/board-cli".`,
   );
   process.exitCode = 1;
 }

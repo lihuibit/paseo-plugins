@@ -1,19 +1,19 @@
 # `paseo-board`
 
-版本：`0.1.2`。
+版本：`0.2.0`。
 
 从普通 shell 管理 Paseo 任务看板，不需要成为 Paseo Agent，也不引入 MCP server。
 外部 Agent（例如用户自己启动的 Claude Code）通过 Bash 调用 `paseo-board ... --json`
 就能看卡片、管理子任务并读取 Agent 输出。
 
 CLI 只依赖 `@getpaseo/client` 的 WebSocket RPC，直接调用插件
-`agentstorm-task-board` 的 `task-board.*` 方法。插件仍装在 Paseo daemon 上，
+`paseo-task-board` 的 `task-board.*` 方法。插件仍装在 Paseo daemon 上，
 调用方不需要安装插件。
 
 ## 环境要求
 
 - Node.js 20+
-- Paseo daemon 已安装并启用 `agentstorm-task-board`（`pluginsEnabled: true`）
+- Paseo daemon 已安装并启用 `paseo-task-board`（`pluginsEnabled: true`）
 - daemon 的密码（如果启用了 `daemon.auth.password`）
 
 ## 安装
@@ -99,7 +99,7 @@ paseo-board create "修复登录超时" \
   --parent TASK-40
 
 paseo-board assign TASK-42 \
-  --project "dev2-agentstorm开发" \
+  --project "dev2-paseo开发" \
   --workspace "dev2-开发" \
   --provider codex --model workbuddy/hy4flash-dev \
   --mode full-access --thinking high

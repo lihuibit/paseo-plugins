@@ -57,20 +57,20 @@ describe("board agent ownership", () => {
   it("labels workers with the board only", () => {
     const labels = boardLabels(task("task"));
     expect(labels).toMatchObject({
-      "agentstorm.board": "1",
-      "agentstorm.task-id": "btask_worker",
-      "agentstorm.kind": "task",
+      "paseo.board": "1",
+      "paseo.task-id": "btask_worker",
+      "paseo.kind": "task",
     });
-    expect(labels["agentstorm.board-admin"]).toBeUndefined();
+    expect(labels["paseo.board-admin"]).toBeUndefined();
   });
 
   it("labels planning agents as board admins", () => {
     const labels = boardLabels(task("task-planning"));
     expect(labels).toMatchObject({
-      "agentstorm.board": "1",
-      "agentstorm.board-admin": "1",
-      "agentstorm.task-id": "btask_planning",
-      "agentstorm.kind": "task-planning",
+      "paseo.board": "1",
+      "paseo.board-admin": "1",
+      "paseo.task-id": "btask_planning",
+      "paseo.kind": "task-planning",
     });
   });
 
@@ -89,9 +89,9 @@ describe("board agent ownership", () => {
     expect(
       options.config.systemPrompt.startsWith("Custom btask_planning"),
     ).toBe(true);
-    expect(options.labels["agentstorm.board-admin"]).toBe("1");
-    expect(options.labels["agentstorm.kind"]).toBe("task-planning");
-    expect(options.metadata["agentstorm.task-id"]).toBe("btask_planning");
+    expect(options.labels["paseo.board-admin"]).toBe("1");
+    expect(options.labels["paseo.kind"]).toBe("task-planning");
+    expect(options.metadata["paseo.task-id"]).toBe("btask_planning");
   });
 
   it("(no metadata key change) keeps the existing plugin metadata", async () => {

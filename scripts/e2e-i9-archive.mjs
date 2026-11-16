@@ -3,7 +3,7 @@
 //
 // Usage:
 //   E2E_PASEO_HOME=~/.paseo-plugin-test E2E_PASEO_PORT=6769 \
-//   E2E_REPORT=<agentstorm>/docs/plugins/evidence/implementation/I9/archive-report.json \
+//   E2E_REPORT=<evidence-dir>/I9/archive-report.json \
 //     node scripts/e2e-i9-archive.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -13,7 +13,7 @@ const port = process.env.E2E_PASEO_PORT ?? "6769";
 const provider = process.env.E2E_PROVIDER ?? "codex";
 const model = process.env.E2E_MODEL ?? "workbuddy/hy4flash-dev";
 const modeId = process.env.E2E_MODE ?? "full-access";
-const pluginId = "agentstorm-task-board";
+const pluginId = "paseo-task-board";
 const reportPath = process.env.E2E_REPORT ?? null;
 
 const password = (await readFile(`${home}/local-credential`, "utf8")).trim();

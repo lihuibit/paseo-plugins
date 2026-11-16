@@ -14,7 +14,7 @@ const client = new DaemonClient({
 await client.connect();
 const call = async (method, input = {}) => {
   const envelope = await client.invokePluginRpc(
-    "agentstorm-shared-assets",
+    "paseo-shared-assets",
     method,
     input,
   );

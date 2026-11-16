@@ -20,7 +20,7 @@ const client = new DaemonClient({
 await client.connect();
 try {
   const envelope = await client.invokePluginRpc(
-    "agentstorm-task-board",
+    "paseo-task-board",
     "task-board.health",
     {},
   );

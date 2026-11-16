@@ -107,7 +107,7 @@ describe("project directory migration", () => {
     await ensureProjectDirectory(workspace);
 
     const log = await readFile(
-      join(home, "plugin-data", "agentstorm-shared-assets", "logs", "rpc.log"),
+      join(home, "plugin-data", "paseo-shared-assets", "logs", "rpc.log"),
       "utf8",
     );
     expect(log).toContain("project-migration");

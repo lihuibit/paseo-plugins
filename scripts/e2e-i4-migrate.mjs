@@ -11,7 +11,7 @@ const pluginPath = join(root, "plugins/task-board");
 const home = process.env.E2E_MIGRATE_HOME ?? "/home/ubuntu/.paseo-i4-migrate";
 const port = process.env.E2E_MIGRATE_PORT ?? "6769";
 const reportPath = process.env.E2E_REPORT ?? null;
-const pluginId = "agentstorm-task-board";
+const pluginId = "paseo-task-board";
 const report = { steps: [], assertions: {} };
 
 function step(name, detail) {

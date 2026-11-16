@@ -3,7 +3,7 @@ set -euo pipefail
 
 HOME_DIR="${PASEO_RELEASE_HOME:-$HOME/.paseo-plugin-test}"
 
-for id in agentstorm-shared-assets agentstorm-task-board; do
+for id in paseo-shared-assets paseo-task-board; do
   paseo plugin remove "$id" --home "$HOME_DIR" || true
 done
 

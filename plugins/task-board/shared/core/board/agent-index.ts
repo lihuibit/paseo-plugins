@@ -3,6 +3,9 @@ import {
   BOARD_LABEL,
   BOARD_METADATA_KEY,
   BOARD_TASK_LABEL,
+  LEGACY_BOARD_LABEL,
+  LEGACY_BOARD_METADATA_KEY,
+  LEGACY_BOARD_TASK_LABEL,
   isTerminalStatus,
   type BoardTask,
 } from "./types";
@@ -18,7 +21,8 @@ function taskIdFromMetadata(
   metadata: Record<string, unknown> | null | undefined,
 ): string | null {
   if (!metadata) return null;
-  const value = metadata[BOARD_METADATA_KEY];
+  const value =
+    metadata[BOARD_METADATA_KEY] ?? metadata[LEGACY_BOARD_METADATA_KEY];
   if (!value || typeof value !== "object") return null;
   const taskId = (value as Record<string, unknown>).taskId;
   return typeof taskId === "string" && taskId.length > 0 ? taskId : null;
@@ -30,13 +34,19 @@ function taskIdFromMetadata(
  * whose payload does not include labels.
  */
 export function taskIdFromAgent(agent: AgentIdentity): string | null {
-  const fromLabel = agent.labels?.[BOARD_TASK_LABEL];
+  const fromLabel =
+    agent.labels?.[BOARD_TASK_LABEL] ?? agent.labels?.[LEGACY_BOARD_TASK_LABEL];
   if (fromLabel) return fromLabel;
   return taskIdFromMetadata(agent.metadata);
 }
 
 export function isBoardAgent(agent: AgentIdentity): boolean {
-  if (agent.labels?.[BOARD_LABEL] === "1") return true;
+  if (
+    agent.labels?.[BOARD_LABEL] === "1" ||
+    agent.labels?.[LEGACY_BOARD_LABEL] === "1"
+  ) {
+    return true;
+  }
   return taskIdFromMetadata(agent.metadata) !== null;
 }
 

@@ -13,7 +13,7 @@ const model = process.env.E2E_MODEL ?? "workbuddy/hy4flash-dev";
 const modeId = process.env.E2E_MODE ?? "full-access";
 const thinking = process.env.E2E_THINKING ?? "high";
 const reportPath = process.env.E2E_REPORT ?? null;
-const pluginId = "agentstorm-task-board";
+const pluginId = "paseo-task-board";
 
 const password = (await readFile(`${home}/local-credential`, "utf8")).trim();
 const client = new DaemonClient({

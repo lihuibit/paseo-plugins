@@ -19,7 +19,7 @@ const modeId = process.env.E2E_MODE ?? "full-access";
 const thinking = process.env.E2E_THINKING ?? "high";
 const reportPath = process.env.E2E_REPORT ?? null;
 const authUrl = process.env.E2E_AUTH_URL ?? "http://127.0.0.1:6767";
-const pluginId = "agentstorm-task-board";
+const pluginId = "paseo-task-board";
 const password = (
   await readFile(join(home, "local-credential"), "utf8")
 ).trim();

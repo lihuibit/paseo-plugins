@@ -65,7 +65,7 @@ describe("global skill scope removal", () => {
     expect(
       JSON.parse(
         await readFile(
-          join(home, "plugin-data/agentstorm-shared-assets/config.json"),
+          join(home, "plugin-data/paseo-shared-assets/config.json"),
           "utf8",
         ),
       ).skills.p1,

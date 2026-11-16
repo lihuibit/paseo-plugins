@@ -28,8 +28,8 @@ paseo plugin ls --home "$HOME_DIR" --json >"$EVIDENCE/plugin-ls-before-upgrade.j
 PASEO_SMOKE_ACTION=verify node "$ROOT/scripts/release-smoke.mjs" >"$EVIDENCE/smoke-before-upgrade.json"
 
 echo "== update to $TARGET_REF =="
-paseo plugin update agentstorm-shared-assets --ref "$TARGET_REF" --home "$HOME_DIR" --yes
-paseo plugin update agentstorm-task-board --ref "$TARGET_REF" --home "$HOME_DIR" --yes
+paseo plugin update paseo-shared-assets --ref "$TARGET_REF" --home "$HOME_DIR" --yes
+paseo plugin update paseo-task-board --ref "$TARGET_REF" --home "$HOME_DIR" --yes
 paseo plugin ls --home "$HOME_DIR" --json >"$EVIDENCE/plugin-ls-after-upgrade.json"
 
 echo "== after upgrade =="

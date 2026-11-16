@@ -9,7 +9,7 @@ const home = process.env.E2E_PASEO_HOME ?? "/home/ubuntu/.paseo-dev";
 const port = process.env.E2E_PASEO_PORT ?? "6767";
 const provider = process.env.E2E_PROVIDER ?? "codex";
 const model = process.env.E2E_MODEL ?? "workbuddy/hy4flash-dev";
-const pluginId = "agentstorm-task-board";
+const pluginId = "paseo-task-board";
 const reportPath = process.env.E2E_REPORT ?? null;
 const password = (await readFile(`${home}/local-credential`, "utf8")).trim();
 
@@ -426,7 +426,7 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 10_000));
   const notificationLog = (
     await readFile(
-      `${home}/plugin-data/agentstorm-task-board/notifications.jsonl`,
+      `${home}/plugin-data/paseo-task-board/notifications.jsonl`,
       "utf8",
     ).catch(() => "")
   )

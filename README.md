@@ -4,9 +4,9 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.3.0` |
-| `task-board`      | `0.2.3` |
-| `paseo-board` CLI | `0.1.2` |
+| `shared-assets`   | `0.4.0` |
+| `task-board`      | `0.3.0` |
+| `paseo-board` CLI | `0.2.0` |
 
 - `shared-assets`：把团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 绑定到
   Paseo Project，并投影到 Provider 原生目录。
@@ -35,7 +35,7 @@ Paseo 插件 monorepo。
 - Agent Profile 只有 `featureValues`；插件读取 `profile.options` 时回退到
   `featureValues`，对调用方仍返回 `options`。
 - `agent.create.after` 的 hook agent 没有 `metadata`，看板改用 `agent.open.before`
-  携带的 `agentstorm.task-id` label 完成绑定；metadata 仍会传给 0.16。
+  携带的 `paseo.task-id` label 完成绑定；metadata 仍会传给 0.16。
 - 看板创建的 Agent 使用 `background: false`：Paseo 的 workspace 活动索引会跳过
   background agent，不设为可见就不会有侧栏「正在运行」状态。0.15.4 的
   “已有 Workspace 不接受 background” 兜底重试仍保留，但主路径不会再触发。
@@ -99,8 +99,8 @@ paseo plugin ls --home ~/.paseo-plugin-test
 npm install && npm run sync:core
 paseo plugin install "$PWD/plugins/shared-assets" --home ~/.paseo-dev
 paseo plugin install "$PWD/plugins/task-board" --home ~/.paseo-dev
-paseo plugin reload agentstorm-shared-assets --home ~/.paseo-dev
-paseo plugin reload agentstorm-task-board --home ~/.paseo-dev
+paseo plugin reload paseo-shared-assets --home ~/.paseo-dev
+paseo plugin reload paseo-task-board --home ~/.paseo-dev
 ```
 
 ## 配置
@@ -111,22 +111,39 @@ paseo plugin reload agentstorm-task-board --home ~/.paseo-dev
   看板顶部显示黄色横幅，状态只能由 hooks 推断。
 - 两个插件的数据都在 `$PASEO_HOME/plugin-data/<plugin-id>/`，插件不写其他 home。
 
-### 保留的兼容标识
+### 0.4.0 / 0.3.0 重命名与迁移
 
-为避免破坏已安装插件、现有 Agent 和卡片绑定，以下持久化标识仍保留 `agentstorm`
-前缀，本版本不重命名：plugin id（`agentstorm-shared-assets`、
-`agentstorm-task-board`）、labels/metadata（`agentstorm.board`、
-`agentstorm.task-id`、`agentstorm.kind`、`agentstorm.board-admin` 等）、包名
-（`@agentstorm/*`）、`plugin-data/agentstorm-*` 目录与 CLI `PLUGIN_ID`。项目内文件
-路径和用户可见文案已改为 Paseo/.paseo。
+这是一个 breaking 版本：插件不再使用 AgentStorm 协议标识。
+
+- plugin id：`paseo-shared-assets` / `paseo-task-board`
+- labels：`paseo.board` / `paseo.task-id` / `paseo.kind` / `paseo.board-admin`
+- metadata key：`paseo.task-board`
+- 包名：`paseo-shared-assets` / `paseo-task-board` / `@paseo-plugins/*`
+- 数据目录：`plugin-data/paseo-shared-assets` / `plugin-data/paseo-task-board`
+
+兼容策略：
+
+- 新 Agent 只写 `paseo.*`。看板读取 labels、metadata 和 hook 载荷时同时接受
+  `paseo.*` 与 legacy `agentstorm.*`，旧卡片绑定的 Agent 仍可识别、停止和归档。
+- 新插件第一次启动或收到第一次 RPC 时，如果新 `plugin-data/paseo-*` 目录不存在而旧
+  `plugin-data/agentstorm-*` 存在，会递归复制旧目录。旧目录保留；新目录已存在时不合并。
+- 插件不会自动删除旧 `agentstorm-*` 注册。升级步骤：
+
+```bash
+paseo plugin remove agentstorm-shared-assets --home ~/.paseo-plugin-test
+paseo plugin remove agentstorm-task-board --home ~/.paseo-plugin-test
+scripts/install.sh
+```
+
+旧 `plugin-data/agentstorm-*` 不会被 `plugin remove` 删除，新插件首次启动时复制。
 
 ## 升级
 
 升级只改插件安装版本，不触碰 `plugin-data` 和项目文件。先确认新版本已提交，再执行：
 
 ```bash
-paseo plugin update agentstorm-shared-assets --ref <new-commit> --home ~/.paseo-plugin-test
-paseo plugin update agentstorm-task-board --ref <new-commit> --home ~/.paseo-plugin-test
+paseo plugin update paseo-shared-assets --ref <new-commit> --home ~/.paseo-plugin-test
+paseo plugin update paseo-task-board --ref <new-commit> --home ~/.paseo-plugin-test
 paseo plugin ls --home ~/.paseo-plugin-test --json
 ```
 
@@ -147,8 +164,8 @@ PASEO_RELEASE_HOME=~/.paseo-plugin-test scripts/uninstall.sh
 等价命令：
 
 ```bash
-paseo plugin remove agentstorm-shared-assets --home ~/.paseo-plugin-test
-paseo plugin remove agentstorm-task-board --home ~/.paseo-plugin-test
+paseo plugin remove paseo-shared-assets --home ~/.paseo-plugin-test
+paseo plugin remove paseo-task-board --home ~/.paseo-plugin-test
 ```
 
 卸载只移除 Paseo 的插件配置，不删除项目内 `.paseo/`、`.codex/skills/`、
@@ -187,7 +204,7 @@ team-assets/
 ## 数据目录
 
 ```text
-$PASEO_HOME/plugin-data/agentstorm-shared-assets/
+$PASEO_HOME/plugin-data/paseo-shared-assets/
 ├── config.json                       # 绑定、投影记录
 ├── repos/<projectId>/                # 团队仓库 checkout
 └── logs/rpc.log                      # RPC 业务错误

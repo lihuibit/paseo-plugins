@@ -5,6 +5,8 @@ import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import {
   BOARD_LABEL,
   BOARD_TASK_LABEL,
+  LEGACY_BOARD_LABEL,
+  LEGACY_BOARD_TASK_LABEL,
   type BoardTask,
 } from "../shared/core/board/types";
 import {
@@ -101,19 +103,28 @@ export async function rebuildFromPaseo(
   paseo: PaseoApi,
   tasks: readonly BoardTask[],
 ): Promise<Record<string, string>> {
-  const page = await paseo.agents.list({
-    includeBackground: true,
-    filter: { labels: { [BOARD_LABEL]: "1" } },
-    page: { limit: 200 },
-  });
+  const pages = await Promise.all(
+    [BOARD_LABEL, LEGACY_BOARD_LABEL].map((label) =>
+      paseo.agents.list({
+        includeBackground: true,
+        filter: { labels: { [label]: "1" } },
+        page: { limit: 200 },
+      }),
+    ),
+  );
   const known = new Set(tasks.map((task) => task.id));
   const index: Record<string, string> = {};
-  for (const entry of page.entries) {
-    const agent = entry.agent;
-    if (agent.archivedAt) continue;
-    const taskId = agent.labels?.[BOARD_TASK_LABEL] ?? taskIdFromAgent(agent);
-    if (!taskId || !known.has(taskId)) continue;
-    index[agent.id] = taskId;
+  for (const page of pages) {
+    for (const entry of page.entries) {
+      const agent = entry.agent;
+      if (agent.archivedAt) continue;
+      const taskId =
+        agent.labels?.[BOARD_TASK_LABEL] ??
+        agent.labels?.[LEGACY_BOARD_TASK_LABEL] ??
+        taskIdFromAgent(agent);
+      if (!taskId || !known.has(taskId)) continue;
+      index[agent.id] = taskId;
+    }
   }
   const agentIds = new Set([
     ...Object.keys(index),

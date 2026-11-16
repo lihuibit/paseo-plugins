@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run test --workspaces --if-present",
-    "build:cli": "npm run build --workspace @agentstorm/board-cli",
+    "build:cli": "npm run build --workspace @paseo-plugins/board-cli",
     "e2e": "node scripts/e2e-rpc.mjs",
     "e2e:i3": "node scripts/e2e-i3.mjs",
     "e2e:task-board": "node scripts/e2e-task-board.mjs",

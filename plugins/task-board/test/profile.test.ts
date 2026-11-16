@@ -142,8 +142,8 @@ describe("Paseo Agent Profiles", () => {
         options: { sandbox_mode: "read-only" },
       },
       labels: {
-        "agentstorm.board": "1",
-        "agentstorm.task-id": "btask_profile1",
+        "paseo.board": "1",
+        "paseo.task-id": "btask_profile1",
       },
       background: false,
     });
