@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "private": true,
   "type": "module",
-  "description": "Command line client for the AgentStorm task board Paseo plugin",
+  "description": "Command line client for the Paseo task board plugin",
   "bin": {
     "paseo-board": "bin/paseo-board.js"
   },

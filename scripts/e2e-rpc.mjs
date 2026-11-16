@@ -152,7 +152,7 @@ async function main() {
   );
   evidence.assertions.instructionsAfter = enabledInstructions;
   evidence.assertions.instructionFiles = {
-    canonical: await readFile(join(demo, ".agentstorm/AGENTS.md"), "utf8"),
+    canonical: await readFile(join(demo, ".paseo/AGENTS.md"), "utf8"),
     codexLink: await exists(join(demo, "AGENTS.md")),
     claudeLink: await exists(join(demo, ".claude/CLAUDE.md")),
   };

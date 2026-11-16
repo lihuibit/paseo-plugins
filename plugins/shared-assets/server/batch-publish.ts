@@ -6,6 +6,7 @@ import {
   parseDocAssetId,
   parseKnowledgeAssetId,
   parseSkillAssetId,
+  PROJECT_DIR,
 } from "../shared/core/paths";
 import { isProviderId, SKILL_ROOTS } from "../shared/core/providers";
 import type {
@@ -128,12 +129,12 @@ async function creationPlan(input: {
         "The shared repository already has AGENTS.md",
       );
     }
-    const localRoot = join(input.workspaceDirectory, ".agentstorm");
+    const localRoot = join(input.workspaceDirectory, PROJECT_DIR);
     const localPath = join(localRoot, "AGENTS.md");
     if (!(await fileExists(localPath))) {
       throw new PluginError(
         "E_ASSET_NOT_FOUND",
-        "The project has no .agentstorm/AGENTS.md to publish",
+        `The project has no ${PROJECT_DIR}/AGENTS.md to publish`,
       );
     }
     const asset = pseudoAsset({
@@ -238,11 +239,7 @@ async function creationPlan(input: {
         "The shared repository already has this knowledge asset",
       );
     }
-    const localRoot = join(
-      input.workspaceDirectory,
-      ".agentstorm",
-      "knowledge",
-    );
+    const localRoot = join(input.workspaceDirectory, PROJECT_DIR, "knowledge");
     const localPath = join(localRoot, `${name}.md`);
     await resolveInside(input.workspaceDirectory, localPath);
     const asset = pseudoAsset({
@@ -281,7 +278,7 @@ async function creationPlan(input: {
       "The shared repository already has this document",
     );
   }
-  const localRoot = join(input.workspaceDirectory, ".agentstorm", "docs", name);
+  const localRoot = join(input.workspaceDirectory, PROJECT_DIR, "docs", name);
   await resolveInside(input.workspaceDirectory, localRoot);
   const scanned = await scanFiles(localRoot);
   if (scanned.length === 0) {

@@ -57,7 +57,7 @@ async function seedCheckout(): Promise<void> {
 }
 
 async function localGuide(): Promise<string> {
-  return join(workspace, ".agentstorm", "knowledge", "guide.md");
+  return join(workspace, ".paseo", "knowledge", "guide.md");
 }
 
 async function remoteGuide(): Promise<string> {
@@ -184,7 +184,7 @@ describe("batch publish", () => {
 
     await writeFile(await localGuide(), `${GUIDE_BASE}local edit\n`);
     await writeFile(
-      join(workspace, ".agentstorm", "knowledge", "other.md"),
+      join(workspace, ".paseo", "knowledge", "other.md"),
       "# Other\n\nlocal edit\n",
     );
     await writeFile(await remoteGuide(), `${GUIDE_BASE}remote edit\n`);
@@ -278,24 +278,24 @@ describe("batch publish", () => {
   });
 });
 
-describe("legacy migration", () => {
-  it("imports non-conflicting files, keeps the source and skips workflows", async () => {
-    await mkdir(join(workspace, ".agentstorm", "workflows"), {
+describe("project asset migration", () => {
+  it("imports .paseo assets, keeps the source and skips workflows", async () => {
+    await mkdir(join(workspace, ".paseo", "workflows"), {
       recursive: true,
     });
     await writeFile(
-      join(workspace, ".agentstorm", "workflows", "old.md"),
+      join(workspace, ".paseo", "workflows", "old.md"),
       "# Workflow\n",
     );
-    await mkdir(join(workspace, ".agentstorm", "docs", "legacy"), {
+    await mkdir(join(workspace, ".paseo", "docs", "legacy"), {
       recursive: true,
     });
     await writeFile(
-      join(workspace, ".agentstorm", "docs", "legacy", "README.md"),
+      join(workspace, ".paseo", "docs", "legacy", "README.md"),
       "# Legacy\n",
     );
     await writeFile(
-      join(workspace, ".agentstorm", "knowledge", "legacy.md"),
+      join(workspace, ".paseo", "knowledge", "legacy.md"),
       "# Legacy knowledge\n",
     );
     await writeFile(await localGuide(), "# Guide\n\nchanged locally\n");
@@ -338,7 +338,7 @@ describe("legacy migration", () => {
     ).toBeNull();
     expect(
       await readFile(
-        join(workspace, ".agentstorm", "knowledge", "legacy.md"),
+        join(workspace, ".paseo", "knowledge", "legacy.md"),
         "utf8",
       ),
     ).toContain("Legacy knowledge");
@@ -350,6 +350,36 @@ describe("legacy migration", () => {
       dryRun: false,
     });
     expect(repeated.reused).toBe(true);
+  });
+
+  it("falls back to .agentstorm only when .paseo is absent", async () => {
+    const legacyWorkspace = await mkdtemp(
+      join(tmpdir(), "shared-assets-legacy-"),
+    );
+    await mkdir(join(legacyWorkspace, ".agentstorm", "knowledge"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(legacyWorkspace, ".agentstorm", "knowledge", "legacy-only.md"),
+      "# Legacy only\n",
+    );
+
+    const report = await migrateLegacy({
+      projectId: "p1",
+      workspaceId: "w2",
+      workspaceDirectory: legacyWorkspace,
+      dryRun: false,
+    });
+    expect(report.applied).toBe(true);
+    expect(
+      await readFile(join(checkout, "knowledge", "legacy-only.md"), "utf8"),
+    ).toContain("Legacy only");
+    expect(
+      await readFile(
+        join(legacyWorkspace, ".agentstorm", "knowledge", "legacy-only.md"),
+        "utf8",
+      ),
+    ).toContain("Legacy only");
   });
 });
 

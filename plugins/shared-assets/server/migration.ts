@@ -1,16 +1,17 @@
-import { lstat, readdir, readFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { appendFile, lstat, mkdir, readdir, readFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { PluginError } from "../shared/core/errors";
 import { unifiedDiff } from "../shared/core/diff";
+import { LEGACY_PROJECT_DIR, PROJECT_DIR } from "../shared/core/paths";
 import { PROVIDERS } from "../shared/core/providers";
 import type {
   MigrationFilePlan,
   MigrationReport,
   MigrationSummary,
 } from "../shared/core/types";
-import { atomicWriteFile, readJson, sha256 } from "./fs-utils";
+import { atomicWriteFile, fileExists, readJson, sha256 } from "./fs-utils";
 import { headRevision, runGit } from "./git";
-import { pluginDataDir, repoDir } from "./plugin-data";
+import { logPath, pluginDataDir, repoDir } from "./plugin-data";
 
 interface SourceFile {
   absolute: string;
@@ -61,6 +62,114 @@ function targetFor(path: string): string | null {
   if (/^knowledge\/[^/]+\.md$/.test(path)) return path;
   if (path.startsWith("docs/") && path.split("/").length >= 3) return path;
   return null;
+}
+
+export interface ProjectDirectoryMigrationResult {
+  applied: boolean;
+  copied: string[];
+  skipped: Array<{ path: string; reason: string }>;
+  errors: string[];
+}
+
+const projectMigrations = new Map<
+  string,
+  Promise<ProjectDirectoryMigrationResult>
+>();
+
+async function logProjectDirectoryMigration(
+  workspaceDirectory: string,
+  result: ProjectDirectoryMigrationResult,
+): Promise<void> {
+  try {
+    await mkdir(dirname(logPath()), { recursive: true });
+    await appendFile(
+      logPath(),
+      `${new Date().toISOString()} project-migration ${JSON.stringify({
+        workspaceDirectory,
+        applied: result.applied,
+        copied: result.copied.length,
+        skipped: result.skipped.length,
+        errors: result.errors,
+      })}\n`,
+    );
+  } catch {
+    // Migration logging must never block project reads.
+  }
+}
+
+async function runProjectDirectoryMigration(
+  workspaceDirectory: string,
+): Promise<ProjectDirectoryMigrationResult> {
+  const result: ProjectDirectoryMigrationResult = {
+    applied: false,
+    copied: [],
+    skipped: [],
+    errors: [],
+  };
+  const targetRoot = join(workspaceDirectory, PROJECT_DIR);
+  const sourceRoot = join(workspaceDirectory, LEGACY_PROJECT_DIR);
+
+  try {
+    if (await fileExists(targetRoot)) return result;
+    if (!(await fileExists(sourceRoot))) return result;
+    result.applied = true;
+    await mkdir(targetRoot, { recursive: true });
+
+    const sourceFiles = await walk(sourceRoot, result.skipped);
+    for (const file of sourceFiles) {
+      const target = targetFor(file.relative);
+      if (!target) {
+        result.skipped.push({
+          path: file.relative,
+          reason: "not part of the project asset set",
+        });
+        continue;
+      }
+      const destination = join(targetRoot, target);
+      if (await fileExists(destination)) {
+        result.skipped.push({
+          path: file.relative,
+          reason: "destination already exists",
+        });
+        continue;
+      }
+      try {
+        await atomicWriteFile(destination, await readFile(file.absolute));
+        result.copied.push(target);
+      } catch (error) {
+        result.errors.push(
+          `${file.relative}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  } catch (error) {
+    result.errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  await logProjectDirectoryMigration(workspaceDirectory, result);
+  return result;
+}
+
+/**
+ * One-time, read-only migration of a project's legacy `.agentstorm` assets
+ * into `.paseo`. `workflows/` is intentionally excluded, and every failure is
+ * reported without blocking the caller.
+ */
+export function ensureProjectDirectory(
+  workspaceDirectory: string,
+): Promise<ProjectDirectoryMigrationResult> {
+  const key = resolve(workspaceDirectory);
+  const pending = projectMigrations.get(key);
+  if (pending) return pending;
+  const migration = runProjectDirectoryMigration(workspaceDirectory).finally(
+    () => {
+      projectMigrations.delete(key);
+    },
+  );
+  projectMigrations.set(key, migration);
+  return migration;
 }
 
 async function summary(
@@ -151,13 +260,15 @@ export async function migrateLegacy(input: {
   workspaceDirectory: string;
   dryRun: boolean;
 }): Promise<MigrationReport> {
-  const sourceRoot = join(input.workspaceDirectory, ".agentstorm");
+  const projectRoot = join(input.workspaceDirectory, PROJECT_DIR);
+  const legacyRoot = join(input.workspaceDirectory, LEGACY_PROJECT_DIR);
+  const sourceRoot = (await fileExists(projectRoot)) ? projectRoot : legacyRoot;
   const skipped: Array<{ path: string; reason: string }> = [];
   const sourceFiles = await walk(sourceRoot, skipped);
   if (sourceFiles.length === 0 && skipped.length === 0) {
     throw new PluginError(
       "E_ASSET_NOT_FOUND",
-      `No .agentstorm files to migrate in ${input.workspaceDirectory}`,
+      `No project assets to migrate in ${input.workspaceDirectory}`,
     );
   }
   const sourceEntries = await Promise.all(
@@ -278,7 +389,7 @@ export async function migrateLegacy(input: {
           "commit",
           "--quiet",
           "-m",
-          "chore(shared-assets): import legacy .agentstorm assets",
+          "chore(shared-assets): import project assets",
           "--",
           ...written,
         ],

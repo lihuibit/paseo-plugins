@@ -78,7 +78,7 @@ async function respond<T>(
       ) as BoardRpcEnvelope<T>;
     }
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[agentstorm-task-board] rpc error", error);
+    console.error("[paseo-task-board] rpc error", error);
     return failBoard("E_INTERNAL", message) as BoardRpcEnvelope<T>;
   }
 }
@@ -119,12 +119,12 @@ export default function contribute(server: PluginServerContext) {
   void ensureDataDir()
     .then(() => {
       console.log(
-        `[agentstorm-task-board] server starting (pid ${process.pid}, PASEO_HOME=${process.env.PASEO_HOME ?? "unset"})`,
+        `[paseo-task-board] server starting (pid ${process.pid}, PASEO_HOME=${process.env.PASEO_HOME ?? "unset"})`,
       );
     })
     .catch((error) => {
       console.error(
-        "[agentstorm-task-board] cannot create plugin data directory",
+        "[paseo-task-board] cannot create plugin data directory",
         error,
       );
     });
@@ -137,7 +137,7 @@ export default function contribute(server: PluginServerContext) {
           scheduler.start(paseo);
         })
         .catch((error) => {
-          console.error("[agentstorm-task-board] initialization failed", error);
+          console.error("[paseo-task-board] initialization failed", error);
         });
     }
     return ready;
@@ -396,7 +396,7 @@ export default function contribute(server: PluginServerContext) {
   registerHooks(server, service, declareTool, adminTools, ensureReady);
 
   return async () => {
-    console.log("[agentstorm-task-board] server stopping");
+    console.log("[paseo-task-board] server stopping");
     await scheduler.stop();
     await notifier.flush();
   };

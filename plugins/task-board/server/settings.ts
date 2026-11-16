@@ -39,7 +39,7 @@ export class BoardSettingsStore {
         this.settings = parsed.data;
       } else {
         console.error(
-          "[agentstorm-task-board] settings.json is invalid; using defaults",
+          "[paseo-task-board] settings.json is invalid; using defaults",
           parsed.error,
         );
       }

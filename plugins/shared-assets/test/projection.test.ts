@@ -1,6 +1,13 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readlink,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -8,7 +15,7 @@ import {
   setInstructionsEnabled,
 } from "../server/instructions";
 import { repoDir } from "../server/plugin-data";
-import { readConfig } from "../server/registry";
+import { readConfig, writeConfig } from "../server/registry";
 import { setSkillEnabled } from "../server/skills";
 
 const SKILL = `---
@@ -131,7 +138,7 @@ describe("instruction projection", () => {
     });
     expect(result.kept).toEqual([]);
     expect(
-      await readFile(join(workspace, ".agentstorm/AGENTS.md"), "utf8"),
+      await readFile(join(workspace, ".paseo/AGENTS.md"), "utf8"),
     ).toContain("Always run tests.");
     expect(existsSync(join(workspace, "AGENTS.md"))).toBe(true);
     expect(existsSync(join(workspace, ".claude/CLAUDE.md"))).toBe(true);
@@ -152,7 +159,7 @@ describe("instruction projection", () => {
     expect(disabled.kept).toEqual([]);
     expect(existsSync(join(workspace, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(workspace, ".claude/CLAUDE.md"))).toBe(false);
-    expect(existsSync(join(workspace, ".agentstorm/AGENTS.md"))).toBe(true);
+    expect(existsSync(join(workspace, ".paseo/AGENTS.md"))).toBe(true);
   });
 
   it("reports a conflict for a user-owned provider entrypoint", async () => {
@@ -168,5 +175,43 @@ describe("instruction projection", () => {
     expect(await readFile(join(workspace, "AGENTS.md"), "utf8")).toBe(
       "# My own instructions\n",
     );
+  });
+
+  it("retargets a legacy provider symlink to .paseo/AGENTS.md", async () => {
+    const legacyCanonical = join(workspace, ".agentstorm", "AGENTS.md");
+    const canonical = join(workspace, ".paseo", "AGENTS.md");
+    await mkdir(dirname(legacyCanonical), { recursive: true });
+    await mkdir(dirname(canonical), { recursive: true });
+    await writeFile(legacyCanonical, "# Legacy instructions\n");
+    await writeFile(canonical, "# Current instructions\n");
+    await symlink(
+      relative(workspace, legacyCanonical),
+      join(workspace, "AGENTS.md"),
+    );
+    const config = await readConfig();
+    config.instructions.p1 = {
+      canonical: {
+        targetPath: legacyCanonical,
+        baselineDigest: "legacy",
+        updatedAt: new Date().toISOString(),
+      },
+      providers: [
+        {
+          provider: "codex",
+          targetPath: join(workspace, "AGENTS.md"),
+          kind: "symlink",
+          baselineDigest: null,
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    };
+    await writeConfig(config);
+
+    await instructionStatus("p1", workspace);
+
+    const updated = await readConfig();
+    expect(updated.instructions.p1?.canonical?.targetPath).toBe(canonical);
+    const link = await readlink(join(workspace, "AGENTS.md"));
+    expect(resolve(workspace, link)).toBe(canonical);
   });
 });

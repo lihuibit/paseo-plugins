@@ -135,11 +135,11 @@ describe("drift tab counts", () => {
   });
 
   it("still counts assets that were never published", async () => {
-    await mkdir(join(workspace, ".agentstorm", "knowledge"), {
+    await mkdir(join(workspace, ".paseo", "knowledge"), {
       recursive: true,
     });
     await writeFile(
-      join(workspace, ".agentstorm", "knowledge", "draft.md"),
+      join(workspace, ".paseo", "knowledge", "draft.md"),
       "# Draft\n",
     );
     const drift = await listDrift("p1", workspace);

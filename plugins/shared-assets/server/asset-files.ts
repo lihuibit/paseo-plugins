@@ -6,6 +6,7 @@ import {
   parseDocAssetId,
   parseKnowledgeAssetId,
   parseSkillAssetId,
+  PROJECT_DIR,
 } from "../shared/core/paths";
 import type { AssetSummary, ProviderId } from "../shared/core/types";
 import { readConfig } from "./registry";
@@ -89,7 +90,7 @@ export async function resolveAssetForWorkspace(input: {
   let relative: string | null = input.path ?? null;
 
   if (asset.kind === "prompt") {
-    localRoot = join(input.workspaceDirectory, ".agentstorm");
+    localRoot = join(input.workspaceDirectory, PROJECT_DIR);
     repositoryRoot = checkout;
     relative = "AGENTS.md";
   } else if (asset.kind === "knowledge") {
@@ -99,7 +100,7 @@ export async function resolveAssetForWorkspace(input: {
         "E_ASSET_NOT_FOUND",
         `Unknown asset: ${asset.assetId}`,
       );
-    localRoot = join(input.workspaceDirectory, ".agentstorm", "knowledge");
+    localRoot = join(input.workspaceDirectory, PROJECT_DIR, "knowledge");
     repositoryRoot = join(checkout, "knowledge");
     relative = `${name}.md`;
   } else if (asset.kind === "doc") {
@@ -109,7 +110,7 @@ export async function resolveAssetForWorkspace(input: {
         "E_ASSET_NOT_FOUND",
         `Unknown asset: ${asset.assetId}`,
       );
-    localRoot = join(input.workspaceDirectory, ".agentstorm", "docs", name);
+    localRoot = join(input.workspaceDirectory, PROJECT_DIR, "docs", name);
     repositoryRoot = join(checkout, "docs", name);
   } else {
     const parsed = parseSkillAssetId(asset.assetId);

@@ -93,7 +93,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "docs", label: "项目文档" },
 ];
 
-/** AgentStorm's Provider order, narrowed to the providers this plugin manages. */
+/** The legacy app's Provider order, narrowed to the providers this plugin manages. */
 const PROVIDER_ORDER: readonly string[] = [
   "codebuddy-code",
   "claude",
@@ -3170,7 +3170,7 @@ function RelationPill({
 }
 
 /**
- * AgentStorm's relationship order: what needs attention first, then linked,
+ * The shared-assets relationship order: what needs attention first, then linked,
  * same-name candidates, shared-only, and finally local-only assets.
  */
 function sortRelationshipRows(

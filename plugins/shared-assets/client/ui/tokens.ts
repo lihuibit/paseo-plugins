@@ -54,7 +54,7 @@ export const MONO_FONT =
 
 /**
  * The plugin theme exposes five surfaces but the shared-assets screens were
- * designed against AgentStorm's six. Surface 3 and the status-dot band are the
+ * designed against the legacy six. Surface 3 and the status-dot band are the
  * two that matter here, so they are filled in from the same palette.
  */
 function isDarkSurface(hex: string): boolean {

@@ -110,7 +110,7 @@ async function main() {
     recursive: true,
     force: true,
   });
-  await rm(join(demo, ".agentstorm/knowledge/local-adopt.md"), {
+  await rm(join(demo, ".paseo/knowledge/local-adopt.md"), {
     force: true,
   });
 
@@ -237,7 +237,7 @@ async function main() {
   });
 
   await writeFile(
-    join(demo, ".agentstorm/knowledge/local-adopt.md"),
+    join(demo, ".paseo/knowledge/local-adopt.md"),
     "# Local adopt\n",
   );
   await writeFile(
@@ -290,7 +290,7 @@ async function main() {
     failed: batch.failed.length,
   });
 
-  const betaPath = join(demo, ".agentstorm/knowledge/beta.md");
+  const betaPath = join(demo, ".paseo/knowledge/beta.md");
   const beta = await readFile(betaPath, "utf8");
   await writeFile(betaPath, `${beta}\nattention edit\n`);
   const attention = (await callOk("shared-assets.projects.list")).find(

@@ -49,24 +49,18 @@ beforeEach(async () => {
 
   await mkdir(join(workspace, ".codex/skills/sonic"), { recursive: true });
   await writeFile(join(workspace, ".codex/skills/sonic/SKILL.md"), SKILL);
-  await mkdir(join(workspace, ".agentstorm/knowledge"), { recursive: true });
-  await writeFile(
-    join(workspace, ".agentstorm/knowledge/notes.md"),
-    "# Notes\n",
-  );
-  await mkdir(join(workspace, ".agentstorm/docs/design/assets"), {
+  await mkdir(join(workspace, ".paseo/knowledge"), { recursive: true });
+  await writeFile(join(workspace, ".paseo/knowledge/notes.md"), "# Notes\n");
+  await mkdir(join(workspace, ".paseo/docs/design/assets"), {
     recursive: true,
   });
   await writeFile(
-    join(workspace, ".agentstorm/docs/design/README.md"),
+    join(workspace, ".paseo/docs/design/README.md"),
     "# Design\n",
   );
+  await writeFile(join(workspace, ".paseo/docs/design/assets/flow.png"), PNG);
   await writeFile(
-    join(workspace, ".agentstorm/docs/design/assets/flow.png"),
-    PNG,
-  );
-  await writeFile(
-    join(workspace, ".agentstorm/AGENTS.md"),
+    join(workspace, ".paseo/AGENTS.md"),
     "# Project instructions\n",
   );
 });

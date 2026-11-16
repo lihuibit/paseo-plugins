@@ -2,7 +2,7 @@
   "name": "paseo-plugins",
   "private": true,
   "version": "0.1.0",
-  "description": "Paseo plugins maintained by the AgentStorm team",
+  "description": "Paseo shared-assets and task-board plugins",
   "workspaces": [
     "packages/*",
     "plugins/*"

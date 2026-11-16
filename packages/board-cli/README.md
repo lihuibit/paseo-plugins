@@ -191,7 +191,7 @@ paseo-board declare TASK-42 progress --summary "正在补测试" --json
   UI/桌面端处理。这样避免外部脚本在无人值守时绕过审批。
 - `stop` 会中断当前 turn 并把卡片置为 `blocked(manual)`；`cancel` 会取消并归档
   Agent；`done` 只改卡片状态。
-- 不引入 MCP server，不修改 Paseo 或 AgentStorm 源码。
+- 不引入 MCP server，不修改 Paseo 源码。
 
 ## 验证
 

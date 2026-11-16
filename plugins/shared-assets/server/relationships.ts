@@ -1,7 +1,11 @@
 import { lstat, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PluginError } from "../shared/core/errors";
-import { parseDocAssetId, parseKnowledgeAssetId } from "../shared/core/paths";
+import {
+  parseDocAssetId,
+  parseKnowledgeAssetId,
+  PROJECT_DIR,
+} from "../shared/core/paths";
 import { parseSkillFrontmatter } from "../shared/core/skill-markdown";
 import { SKILL_ROOTS } from "../shared/core/providers";
 import type {
@@ -110,7 +114,7 @@ async function localSkills(
 async function localPrompt(
   workspaceDirectory: string,
 ): Promise<LocalAssetSummary | null> {
-  const path = join(workspaceDirectory, ".agentstorm", "AGENTS.md");
+  const path = join(workspaceDirectory, PROJECT_DIR, "AGENTS.md");
   if (!(await fileExists(path))) return null;
   return await localFileSummary(
     "local:prompt",
@@ -125,7 +129,7 @@ async function localPrompt(
 async function localKnowledge(
   workspaceDirectory: string,
 ): Promise<LocalAssetSummary[]> {
-  const directory = join(workspaceDirectory, ".agentstorm", "knowledge");
+  const directory = join(workspaceDirectory, PROJECT_DIR, "knowledge");
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -153,7 +157,7 @@ async function localKnowledge(
 async function localDocs(
   workspaceDirectory: string,
 ): Promise<LocalAssetSummary[]> {
-  const directory = join(workspaceDirectory, ".agentstorm", "docs");
+  const directory = join(workspaceDirectory, PROJECT_DIR, "docs");
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -525,7 +529,7 @@ export async function readLocalAsset(input: {
   let relativePath: string;
 
   if (input.kind === "prompt") {
-    localRoot = join(workspace, ".agentstorm");
+    localRoot = join(workspace, PROJECT_DIR);
     relativePath = "AGENTS.md";
   } else if (input.kind === "knowledge") {
     const name = /^local:knowledge\/([^/]+)$/.exec(input.localAssetId)?.[1];
@@ -535,7 +539,7 @@ export async function readLocalAsset(input: {
         `Unknown local knowledge asset: ${input.localAssetId}`,
       );
     }
-    localRoot = join(workspace, ".agentstorm", "knowledge");
+    localRoot = join(workspace, PROJECT_DIR, "knowledge");
     relativePath = `${name}.md`;
   } else if (input.kind === "doc") {
     const name = parseDocAssetId(input.localAssetId.replace(/^local:/, ""));
@@ -545,7 +549,7 @@ export async function readLocalAsset(input: {
         `Unknown local document asset: ${input.localAssetId}`,
       );
     }
-    localRoot = join(workspace, ".agentstorm", "docs", name);
+    localRoot = join(workspace, PROJECT_DIR, "docs", name);
     relativePath = input.path ?? (await firstFile(localRoot));
   } else {
     const match = /^local-skill:([^/]+)\/([^/]+)$/.exec(input.localAssetId);
@@ -814,10 +818,10 @@ export async function unlinkRelationship(input: {
     }
     const localRoot =
       input.kind === "knowledge"
-        ? join(input.workspaceDirectory, ".agentstorm", "knowledge")
+        ? join(input.workspaceDirectory, PROJECT_DIR, "knowledge")
         : join(
             input.workspaceDirectory,
-            ".agentstorm",
+            PROJECT_DIR,
             "docs",
             input.assetId.replace(/^doc\//, ""),
           );

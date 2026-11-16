@@ -85,7 +85,7 @@ async function defaultRecord(record: NotificationRecord): Promise<void> {
     await appendFile(notificationsPath(), `${JSON.stringify(record)}\n`);
   } catch (error) {
     console.error(
-      "[agentstorm-task-board] cannot append notification record",
+      "[paseo-task-board] cannot append notification record",
       error,
     );
   }
@@ -121,10 +121,7 @@ export class WeComNotifier {
     this.queue = this.queue
       .then(() => this.deliverIfEnabled(task, event))
       .catch((error: unknown) => {
-        console.error(
-          "[agentstorm-task-board] notification queue failed",
-          error,
-        );
+        console.error("[paseo-task-board] notification queue failed", error);
       });
   }
 

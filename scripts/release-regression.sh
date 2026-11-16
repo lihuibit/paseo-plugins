@@ -93,7 +93,7 @@ echo "== user files after uninstall =="
 } | tee "$EVIDENCE/after-uninstall-files.txt"
 
 test -f "$PROJECT_DIR/notes/user-file.txt"
-test -f "$PROJECT_DIR/.agentstorm/AGENTS.md"
+test -f "$PROJECT_DIR/.paseo/AGENTS.md"
 test -f "$PROJECT_DIR/.codex/skills/code-review/SKILL.md"
 test -f "$PROJECT_DIR/.claude/skills/code-review/SKILL.md"
 test ! -f "$PROJECT_DIR/.codex/skills/writing/SKILL.md"

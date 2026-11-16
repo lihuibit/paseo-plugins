@@ -119,7 +119,7 @@ async function main() {
   });
   evidence.assertions.pull = pulled;
   assert(
-    await exists(join(demo, ".agentstorm", "knowledge", "deploy.md")),
+    await exists(join(demo, ".paseo", "knowledge", "deploy.md")),
     "workspace pull did not copy deploy.md",
   );
   step("workspace pull", {
@@ -139,7 +139,7 @@ async function main() {
     syncedDrift.map((item) => `${item.assetId}:${item.status}`),
   );
 
-  const localGuide = join(demo, ".agentstorm", "knowledge", "deploy.md");
+  const localGuide = join(demo, ".paseo", "knowledge", "deploy.md");
   const remoteGuide = join(checkout, "knowledge", "deploy.md");
   const baseGuide = await readFile(localGuide, "utf8");
   await writeFile(
@@ -272,8 +272,8 @@ async function main() {
   });
   await call("shared-assets.sync", { projectId });
   await call("shared-assets.workspace.pull", { projectId, workspaceId });
-  const alphaLocal = join(demo, ".agentstorm", "knowledge", "alpha.md");
-  const betaLocal = join(demo, ".agentstorm", "knowledge", "beta.md");
+  const alphaLocal = join(demo, ".paseo", "knowledge", "alpha.md");
+  const betaLocal = join(demo, ".paseo", "knowledge", "beta.md");
   await writeFile(alphaLocal, "# Alpha\n\nbase\n\nalpha local\n");
   await writeFile(betaLocal, "# Beta\n\nbase\n\nbeta local\n");
   await remoteCommit("docs: beta remote conflict", async (dir) => {
@@ -351,7 +351,7 @@ async function main() {
   });
   await call("shared-assets.sync", { projectId });
   await call("shared-assets.workspace.pull", { projectId, workspaceId });
-  const gammaLocal = join(demo, ".agentstorm", "knowledge", "gamma.md");
+  const gammaLocal = join(demo, ".paseo", "knowledge", "gamma.md");
   await writeFile(gammaLocal, "# Gamma\n\nlocal change\n");
   driftNow = await drift();
   assert(
@@ -367,14 +367,17 @@ async function main() {
   });
   driftNow = await drift();
   assert(
-    statusOf(driftNow, "knowledge/gamma.md") === "synced",
-    "overwrite did not restore gamma",
+    statusOf(driftNow, "knowledge/gamma.md") === null,
+    "overwrite left gamma in the drift list",
   );
   assert(
     (await readFile(gammaLocal, "utf8")).includes("base"),
     "overwrite kept local gamma content",
   );
-  step("drift overwrite action", statusOf(driftNow, "knowledge/gamma.md"));
+  step(
+    "drift overwrite action",
+    statusOf(driftNow, "knowledge/gamma.md") ?? "synced",
+  );
 
   const ignoreSet = await call("shared-assets.ignore.rules.set", {
     projectId,
@@ -398,20 +401,20 @@ async function main() {
   await call("shared-assets.ignore.rules.set", { projectId, raw: "" });
   step("ignore rules", { commit: ignoreSet.commit });
 
-  await mkdir(join(demo, ".agentstorm", "docs", "legacy-i3"), {
+  await mkdir(join(demo, ".paseo", "docs", "legacy-i3"), {
     recursive: true,
   });
-  await mkdir(join(demo, ".agentstorm", "workflows"), { recursive: true });
+  await mkdir(join(demo, ".paseo", "workflows"), { recursive: true });
   await writeFile(
-    join(demo, ".agentstorm", "knowledge", "legacy-i3.md"),
+    join(demo, ".paseo", "knowledge", "legacy-i3.md"),
     "# Legacy I3\n\nMigrated knowledge.\n",
   );
   await writeFile(
-    join(demo, ".agentstorm", "docs", "legacy-i3", "README.md"),
+    join(demo, ".paseo", "docs", "legacy-i3", "README.md"),
     "# Legacy I3 doc\n",
   );
   await writeFile(
-    join(demo, ".agentstorm", "workflows", "old.md"),
+    join(demo, ".paseo", "workflows", "old.md"),
     "# Workflow\n\nMust not migrate.\n",
   );
   const migrationPreview = await call("shared-assets.migrate", {
@@ -457,7 +460,7 @@ async function main() {
     "migration did not import docs",
   );
   assert(
-    await exists(join(demo, ".agentstorm", "knowledge", "legacy-i3.md")),
+    await exists(join(demo, ".paseo", "knowledge", "legacy-i3.md")),
     "migration deleted the source",
   );
   assert(

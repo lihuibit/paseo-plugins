@@ -202,9 +202,9 @@ describe("association lifecycle", () => {
   });
 
   it("adopts knowledge and docs with both modes", async () => {
-    await mkdir(join(workspace, ".agentstorm/knowledge"), { recursive: true });
+    await mkdir(join(workspace, ".paseo/knowledge"), { recursive: true });
     await writeFile(
-      join(workspace, ".agentstorm/knowledge/alpha.md"),
+      join(workspace, ".paseo/knowledge/alpha.md"),
       "# Local alpha\n",
     );
     await adoptRelationship({
@@ -217,14 +217,14 @@ describe("association lifecycle", () => {
       mode: "preserve-local",
     });
     expect(
-      await readFile(join(workspace, ".agentstorm/knowledge/alpha.md"), "utf8"),
+      await readFile(join(workspace, ".paseo/knowledge/alpha.md"), "utf8"),
     ).toBe("# Local alpha\n");
 
-    await mkdir(join(workspace, ".agentstorm/docs/design"), {
+    await mkdir(join(workspace, ".paseo/docs/design"), {
       recursive: true,
     });
     await writeFile(
-      join(workspace, ".agentstorm/docs/design/README.md"),
+      join(workspace, ".paseo/docs/design/README.md"),
       "# Local design\n",
     );
     await adoptRelationship({
@@ -237,10 +237,7 @@ describe("association lifecycle", () => {
       mode: "use-remote",
     });
     expect(
-      await readFile(
-        join(workspace, ".agentstorm/docs/design/README.md"),
-        "utf8",
-      ),
+      await readFile(join(workspace, ".paseo/docs/design/README.md"), "utf8"),
     ).toBe("# Design\n");
 
     await unlinkRelationship({
@@ -251,13 +248,13 @@ describe("association lifecycle", () => {
       assetId: "doc/design",
       deleteLocal: true,
     });
-    expect(existsSync(join(workspace, ".agentstorm/docs/design"))).toBe(false);
+    expect(existsSync(join(workspace, ".paseo/docs/design"))).toBe(false);
   });
 
   it("adopts a local AGENTS.md without overwriting it", async () => {
-    await mkdir(join(workspace, ".agentstorm"), { recursive: true });
+    await mkdir(join(workspace, ".paseo"), { recursive: true });
     await writeFile(
-      join(workspace, ".agentstorm/AGENTS.md"),
+      join(workspace, ".paseo/AGENTS.md"),
       "# Local instructions\n",
     );
     await adoptRelationship({
@@ -269,9 +266,9 @@ describe("association lifecycle", () => {
       localAssetId: "local:prompt",
       mode: "preserve-local",
     });
-    expect(
-      await readFile(join(workspace, ".agentstorm/AGENTS.md"), "utf8"),
-    ).toBe("# Local instructions\n");
+    expect(await readFile(join(workspace, ".paseo/AGENTS.md"), "utf8")).toBe(
+      "# Local instructions\n",
+    );
     expect(existsSync(join(workspace, "AGENTS.md"))).toBe(true);
   });
 });

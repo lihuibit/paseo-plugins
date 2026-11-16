@@ -1,6 +1,6 @@
 # Task Board（`agentstorm-task-board`）
 
-版本：`0.2.1`。
+版本：`0.2.3`。
 
 Paseo 任务看板插件：卡片、分配 Agent、启动/停止、生命周期 hooks 驱动状态、
 Agent 主动调用的 `board_declare` 工具，以及定时/周期、WeCom 通知、父子任务和
@@ -262,6 +262,6 @@ npm run e2e:i4-migrate
 E2E_PASEO_HOME=~/.paseo-plugin-test E2E_PASEO_PORT=6769 npm run e2e:planning
 ```
 
-I2 / I4 的实测截图、日志与落盘快照在 AgentStorm 仓库
+I2 / I4 的实测截图、日志与落盘快照在 legacy AgentStorm 仓库（历史证据）
 `docs/plugins/evidence/implementation/I2/`、`.../I4/`。
 规划任务工具的独立 home 端到端记录在 `.../I6/`。

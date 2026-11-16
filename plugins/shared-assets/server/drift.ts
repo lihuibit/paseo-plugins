@@ -12,6 +12,7 @@ import {
   parseDocAssetId,
   parseKnowledgeAssetId,
   parseSkillAssetId,
+  PROJECT_DIR,
 } from "../shared/core/paths";
 import { SKILL_ROOTS } from "../shared/core/providers";
 import { readBaselines, type ScopeBaselines } from "./baseline";
@@ -39,10 +40,10 @@ const STATUS_ORDER: DriftStatus[] = [
 /**
  * Drift the user still has to act on.
  *
- * AgentStorm's `isDriftedSyncStatus` is the reference: a `synced` copy needs no
- * reminder, and a `missing` one is not an actionable difference either. Local
- * assets the shared library has never seen are kept because publishing them is
- * the user's next step.
+ * The legacy shared-assets `isDriftedSyncStatus` is the reference: a `synced`
+ * copy needs no reminder, and a `missing` one is not an actionable difference
+ * either. Local assets the shared library has never seen are kept because
+ * publishing them is the user's next step.
  */
 const ATTENTION_STATUSES: ReadonlySet<DriftStatus> = new Set([
   "local-update",
@@ -150,7 +151,7 @@ async function promptItem(
   checkout: string,
   baselines: ScopeBaselines,
 ): Promise<Omit<DriftItem, "ignored"> | null> {
-  const localPath = join(workspaceDirectory, ".agentstorm", "AGENTS.md");
+  const localPath = join(workspaceDirectory, PROJECT_DIR, "AGENTS.md");
   const hasBaseline = Object.values(baselines.entries).some(
     (entry) => entry.assetId === "prompt",
   );
@@ -197,7 +198,7 @@ async function knowledgeItems(
     const name = parseKnowledgeAssetId(asset.assetId);
     if (name) names.add(name);
   }
-  const localRoot = join(workspaceDirectory, ".agentstorm", "knowledge");
+  const localRoot = join(workspaceDirectory, PROJECT_DIR, "knowledge");
   try {
     for (const entry of await readdir(localRoot, { withFileTypes: true })) {
       if (entry.isFile() && entry.name.endsWith(".md")) {
@@ -258,7 +259,7 @@ async function docItems(
     const name = parseDocAssetId(asset.assetId);
     if (name) names.add(name);
   }
-  const localRoot = join(workspaceDirectory, ".agentstorm", "docs");
+  const localRoot = join(workspaceDirectory, PROJECT_DIR, "docs");
   try {
     for (const entry of await readdir(localRoot, { withFileTypes: true })) {
       if (entry.isDirectory()) names.add(entry.name);

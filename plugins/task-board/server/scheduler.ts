@@ -119,7 +119,7 @@ export class SchedulerLock {
         now - heartbeat >= (this.options.staleMs ?? STALE_LOCK_MS)
       ) {
         console.warn(
-          `[agentstorm-task-board] taking over stale scheduler lock from ${existing.value.instanceId}`,
+          `[paseo-task-board] taking over stale scheduler lock from ${existing.value.instanceId}`,
         );
       }
     } else {
@@ -211,7 +211,7 @@ export class Scheduler {
     if (this.paseo || this.stopped) return;
     this.paseo = paseo;
     console.log(
-      `[agentstorm-task-board] scheduler starting (instance ${this.lock.instanceId})`,
+      `[paseo-task-board] scheduler starting (instance ${this.lock.instanceId})`,
     );
     void this.tick();
     this.timer = setInterval(() => void this.tick(), this.tickMs);
@@ -226,7 +226,7 @@ export class Scheduler {
         const acquired = await this.lock.acquire();
         if (!acquired) return;
         console.log(
-          `[agentstorm-task-board] scheduler lock acquired by ${this.lock.instanceId}`,
+          `[paseo-task-board] scheduler lock acquired by ${this.lock.instanceId}`,
         );
       } else {
         await this.lock.heartbeat();
@@ -246,10 +246,7 @@ export class Scheduler {
       this.lastError = null;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
-      console.error(
-        "[agentstorm-task-board] scheduler tick failed",
-        this.lastError,
-      );
+      console.error("[paseo-task-board] scheduler tick failed", this.lastError);
     } finally {
       this.running = false;
     }

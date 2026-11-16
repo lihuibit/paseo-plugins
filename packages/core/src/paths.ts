@@ -1,5 +1,8 @@
 import type { SkillScope } from "./types";
 
+export const PROJECT_DIR = ".paseo";
+export const LEGACY_PROJECT_DIR = ".agentstorm";
+
 const CREDENTIAL_NAMES = new Set([
   ".env",
   ".env.local",

@@ -5,12 +5,12 @@ import { registerHandlers, runAutoSync } from "./server/service";
 export default function contribute(server: PluginServerContext) {
   void ensureDataDirs().catch((error) => {
     console.error(
-      "[agentstorm-shared-assets] cannot create plugin data directory",
+      "[paseo-shared-assets] cannot create plugin data directory",
       error,
     );
   });
   console.log(
-    `[agentstorm-shared-assets] server starting (pid ${process.pid}, PASEO_HOME=${process.env.PASEO_HOME ?? "unset"})`,
+    `[paseo-shared-assets] server starting (pid ${process.pid}, PASEO_HOME=${process.env.PASEO_HOME ?? "unset"})`,
   );
   registerHandlers(server);
   const intervalMs = Number(process.env.SHARED_ASSETS_AUTO_SYNC_MS ?? "60000");

@@ -1,6 +1,7 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AssetKind } from "../shared/core/types";
+import { PROJECT_DIR } from "../shared/core/paths";
 import {
   baselineKey,
   readBaselines,
@@ -40,7 +41,7 @@ async function collectFiles(
       kind: "prompt",
       relativePath: "AGENTS.md",
       repositoryPath: "AGENTS.md",
-      localPath: join(workspaceDirectory, ".agentstorm", "AGENTS.md"),
+      localPath: join(workspaceDirectory, PROJECT_DIR, "AGENTS.md"),
       remotePath: promptRemote,
     });
   }
@@ -58,7 +59,7 @@ async function collectFiles(
             : `${asset.path}/${relativePath}`,
         localPath: join(
           workspaceDirectory,
-          ".agentstorm",
+          PROJECT_DIR,
           asset.kind === "knowledge" ? "knowledge" : "docs",
           asset.kind === "knowledge"
             ? relativePath
@@ -166,11 +167,11 @@ export async function materializeWorkspace(
   return result;
 }
 
-/** Lists workspace-local files below `.agentstorm/knowledge` and docs. */
+/** Lists workspace-local files below `.paseo/knowledge` and docs. */
 export async function localWorkingFiles(
   workspaceDirectory: string,
 ): Promise<string[]> {
-  const root = join(workspaceDirectory, ".agentstorm");
+  const root = join(workspaceDirectory, PROJECT_DIR);
   if (!(await fileExists(root))) return [];
   return (await scanFiles(root)).map((file) => file.path);
 }

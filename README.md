@@ -4,8 +4,8 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.2.6` |
-| `task-board`      | `0.2.1` |
+| `shared-assets`   | `0.3.0` |
+| `task-board`      | `0.2.3` |
 | `paseo-board` CLI | `0.1.2` |
 
 - `shared-assets`：把团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 绑定到
@@ -109,7 +109,16 @@ paseo plugin reload agentstorm-task-board --home ~/.paseo-dev
 - 看板 UI 需要 `features.webUi.enabled: true`（daemon 自带 Web 客户端）。
 - 看板 Agent 的 `board_declare` 需要 `daemon.mcp.injectIntoAgents: true`；未开启时
   看板顶部显示黄色横幅，状态只能由 hooks 推断。
-- 两个插件的数据都在 `$PASEO_HOME/plugin-data/<plugin-id>/`，不写 AgentStorm home。
+- 两个插件的数据都在 `$PASEO_HOME/plugin-data/<plugin-id>/`，插件不写其他 home。
+
+### 保留的兼容标识
+
+为避免破坏已安装插件、现有 Agent 和卡片绑定，以下持久化标识仍保留 `agentstorm`
+前缀，本版本不重命名：plugin id（`agentstorm-shared-assets`、
+`agentstorm-task-board`）、labels/metadata（`agentstorm.board`、
+`agentstorm.task-id`、`agentstorm.kind`、`agentstorm.board-admin` 等）、包名
+（`@agentstorm/*`）、`plugin-data/agentstorm-*` 目录与 CLI `PLUGIN_ID`。项目内文件
+路径和用户可见文案已改为 Paseo/.paseo。
 
 ## 升级
 
@@ -142,7 +151,7 @@ paseo plugin remove agentstorm-shared-assets --home ~/.paseo-plugin-test
 paseo plugin remove agentstorm-task-board --home ~/.paseo-plugin-test
 ```
 
-卸载只移除 Paseo 的插件配置，不删除项目内 `.agentstorm/`、`.codex/skills/`、
+卸载只移除 Paseo 的插件配置，不删除项目内 `.paseo/`、`.codex/skills/`、
 `.claude/skills/` 文件，也不删除用户项目文件；`plugin-data` 保留，重装后可继续
 使用原绑定和卡片。
 
@@ -184,14 +193,14 @@ $PASEO_HOME/plugin-data/agentstorm-shared-assets/
 └── logs/rpc.log                      # RPC 业务错误
 ```
 
-插件不读写 AgentStorm home，也不依赖 AgentStorm 服务端、CLI 或流水线运行时代码。
+插件只运行在 Paseo 插件宿主内，不依赖其他 daemon、CLI 或流水线运行时代码。
 
 ## 投影
 
 | 资产             | 项目位置                                          |
 | ---------------- | ------------------------------------------------- |
 | Skill            | `.codex/skills/<name>/`、`.claude/skills/<name>/` |
-| 共享 `AGENTS.md` | `.agentstorm/AGENTS.md`（canonical）              |
+| 共享 `AGENTS.md` | `.paseo/AGENTS.md`（canonical）                   |
 | Codex 入口       | 项目根 `AGENTS.md`（符号链接，失败时受管副本）    |
 | Claude 入口      | `.claude/CLAUDE.md`（符号链接，失败时受管副本）   |
 
@@ -200,7 +209,7 @@ $PASEO_HOME/plugin-data/agentstorm-shared-assets/
 - 已存在的用户文件进入冲突，不覆盖。
 - 内容一致时不重复写盘。
 - 停用 Skill 只删除基线未变的受管副本；本地改过的副本保留。
-- 停用/解绑指令入口只删除本插件创建的链接/受管副本，保留 `.agentstorm/AGENTS.md`。
+- 停用/解绑指令入口只删除本插件创建的链接/受管副本，保留 `.paseo/AGENTS.md`。
 - 解绑时若 checkout 有未提交改动或未推送提交会被拒绝；推送或显式 `force` 后才能解绑。
 - 卸载插件不删除任何项目内文件。
 
@@ -228,7 +237,7 @@ Knowledge、Prompt、Skill 文件、Doc 文本文件支持“校验并预览 dif
 
 ### drift 与 ignore
 
-drift 按文件比较上次基线、项目 `.agentstorm/` 或 Provider 投影副本、共享 checkout。
+drift 按文件比较上次基线、项目 `.paseo/` 或 Provider 投影副本、共享 checkout。
 状态为 `synced`、`local-update`、`remote-update`、`diverged`、`remote-deleted`、
 `unpublished-local`、`missing`。
 
@@ -240,13 +249,19 @@ drift 按文件比较上次基线、项目 `.agentstorm/` 或 Provider 投影副
   `asset:<assetId>` 和裸路径，通过 `ignore.rules.set` 编辑并提交。
 - 单条 drift 忽略保存在 Workspace 根 `shared-library-ignores.json`，解绑后保留。
 
-### `.agentstorm/` 一次性迁移
+### `.agentstorm/` → `.paseo/` 一次性迁移
 
-`shared-assets.migrate` 默认 dry-run：导入 `.agentstorm/AGENTS.md`、
+项目首次被插件访问时，如果 `.paseo/` 不存在而旧 `.agentstorm/` 存在，插件会复制
+`AGENTS.md`、`knowledge/` 和 `docs/` 到 `.paseo/`。`workflows/` 不复制；旧目录只读，
+不删除、不改写。若 `.paseo/` 已存在则以它为准，不合并旧目录。复制结果写入
+`logs/rpc.log`；迁移失败只记录错误，不阻断读取。
+
+`shared-assets.migrate` 默认 dry-run：从项目 `.paseo/` 导入 `AGENTS.md`、
 `knowledge/*.md`、`docs/<name>/**`；跳过 `workflows/`；Provider 项目级 Skill 只列为
-“可发布候选”。目标内容不同记为冲突、不覆盖；源目录只读，执行后源文件仍在。报告包含
-每个文件的 `import/skip/conflict`、冲突 diff、迁移前后文件数/字节数与 digest；
-`sourceDigest` 未变化时直接复用上次记录。
+“可发布候选”。仅在 `.paseo/` 不存在时回退读取旧 `.agentstorm/`。目标内容不同记为
+冲突、不覆盖；源目录只读，执行后源文件仍在。报告包含每个文件的
+`import/skip/conflict`、冲突 diff、迁移前后文件数/字节数与 digest；`sourceDigest`
+未变化时直接复用上次记录。
 
 ### Provider 矩阵
 
@@ -361,7 +376,7 @@ E2E_PROJECT_ID=<projectId> E2E_WORKSPACE_ID=<workspaceId> node scripts/e2e-rpc.m
 node scripts/e2e-i3.mjs
 ```
 
-I1 的实测记录与截图在 AgentStorm 仓库：
+I1 的实测记录与截图在 legacy AgentStorm 仓库（历史证据）：
 `docs/plugins/evidence/implementation/I1/`。
 
 ## Task Board
@@ -370,14 +385,14 @@ I1 的实测记录与截图在 AgentStorm 仓库：
 `board_declare` 契约和数据目录见
 [`plugins/task-board/README.md`](plugins/task-board/README.md)。
 
-I2 的实测记录、截图与落盘快照在 AgentStorm 仓库：
+I2 的实测记录、截图与落盘快照在 legacy AgentStorm 仓库（历史证据）：
 `docs/plugins/evidence/implementation/I2/`。复跑：
 
 ```bash
 E2E_PROJECT_ID=<prj_id> E2E_WORKSPACE_ID=<wks_id> npm run e2e:task-board
 ```
 
-I3 的实测记录、截图与 RPC 证据在 AgentStorm 仓库
+I3 的实测记录、截图与 RPC 证据在 legacy AgentStorm 仓库（历史证据）
 `docs/plugins/evidence/implementation/I3/`。
 
 I4 的补齐（permission hooks、定时/周期、WeCom、层级、迁移、UI）记录在：
@@ -388,7 +403,7 @@ npm run e2e:i4             # dev daemon：定时重启、recurring、permission�
 npm run e2e:i4-migrate     # 独立 home（6769）：迁移只读与 UI 种子数据
 ```
 
-I12 的 0.15.4 正式版兼容证据（含 0.16.0 回归）在 AgentStorm 仓库：
+I12 的 0.15.4 正式版兼容证据（含 0.16.0 回归）在 legacy AgentStorm 仓库（历史证据）：
 `docs/plugins/evidence/implementation/I12/`。
 
 ### 看板 CLI（外部 Agent）

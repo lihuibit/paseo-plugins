@@ -598,7 +598,7 @@ export function TabButton({
 }
 
 /**
- * The in-page overlay the AgentStorm shared-asset dialogs use. The plugin host
+ * The in-page overlay the shared-asset dialogs use. The plugin host
  * modal has its own chrome and width, which is why the two implementations did
  * not line up; this one lives inside the screen and can be matched exactly.
  */

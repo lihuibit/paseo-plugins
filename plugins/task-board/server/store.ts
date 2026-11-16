@@ -53,7 +53,7 @@ export class BoardStore {
       this.document = ensureTaskDocument(raw);
     } catch (error) {
       console.error(
-        "[agentstorm-task-board] tasks.json is invalid; starting empty",
+        "[paseo-task-board] tasks.json is invalid; starting empty",
         error,
       );
       this.document = emptyBoardDocument();
@@ -101,7 +101,7 @@ export async function appendEvent(event: BoardEvent): Promise<void> {
     await mkdir(dirname(eventsPath()), { recursive: true });
     await appendFile(eventsPath(), `${JSON.stringify(event)}\n`);
   } catch (error) {
-    console.error("[agentstorm-task-board] cannot append event", error);
+    console.error("[paseo-task-board] cannot append event", error);
   }
 }
 
@@ -110,10 +110,7 @@ export async function appendDeleted(event: BoardEvent): Promise<void> {
     await mkdir(dirname(deletedPath()), { recursive: true });
     await appendFile(deletedPath(), `${JSON.stringify(event)}\n`);
   } catch (error) {
-    console.error(
-      "[agentstorm-task-board] cannot append deletion audit",
-      error,
-    );
+    console.error("[paseo-task-board] cannot append deletion audit", error);
   }
 }
 

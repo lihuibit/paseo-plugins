@@ -173,11 +173,11 @@ export class TaskBoardService {
           }
           await this.index.replace(rebuilt);
           console.log(
-            `[agentstorm-task-board] restored ${document.tasks.length} tasks and ${Object.keys(rebuilt).length} agent bindings`,
+            `[paseo-task-board] restored ${document.tasks.length} tasks and ${Object.keys(rebuilt).length} agent bindings`,
           );
         } catch (error) {
           console.error(
-            "[agentstorm-task-board] agent index rebuild failed; using persisted index",
+            "[paseo-task-board] agent index rebuild failed; using persisted index",
             error,
           );
         }
@@ -222,23 +222,21 @@ export class TaskBoardService {
       await handle.reload().catch(() => undefined);
       if (handle.archivedAt) {
         console.log(
-          `[agentstorm-task-board] agent ${agentId} already archived (${reason})`,
+          `[paseo-task-board] agent ${agentId} already archived (${reason})`,
         );
         return;
       }
       await handle.archive();
-      console.log(
-        `[agentstorm-task-board] archived agent ${agentId} (${reason})`,
-      );
+      console.log(`[paseo-task-board] archived agent ${agentId} (${reason})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/not found|missing|archived/i.test(message)) {
         console.log(
-          `[agentstorm-task-board] agent ${agentId} is gone; archive treated as success (${reason})`,
+          `[paseo-task-board] agent ${agentId} is gone; archive treated as success (${reason})`,
         );
       } else {
         console.error(
-          `[agentstorm-task-board] could not archive ${agentId} (${reason})`,
+          `[paseo-task-board] could not archive ${agentId} (${reason})`,
           error,
         );
       }
@@ -246,7 +244,7 @@ export class TaskBoardService {
       this.archivingAgents.delete(agentId);
       await this.index.unbind(agentId).catch((error: unknown) => {
         console.error(
-          `[agentstorm-task-board] could not unbind ${agentId} from agentIndex`,
+          `[paseo-task-board] could not unbind ${agentId} from agentIndex`,
           error,
         );
       });
@@ -665,7 +663,7 @@ export class TaskBoardService {
           await paseo.agents.ref(agentId).reload();
         } catch (error) {
           console.error(
-            `[agentstorm-task-board] could not interrupt ${agentId}`,
+            `[paseo-task-board] could not interrupt ${agentId}`,
             error,
           );
         }
@@ -956,7 +954,7 @@ export class TaskBoardService {
       toolInjectionEnabled =
         raw.mcp?.injectIntoAgents ?? raw.daemon?.mcp?.injectIntoAgents ?? false;
     } catch (error) {
-      console.error("[agentstorm-task-board] cannot read daemon config", error);
+      console.error("[paseo-task-board] cannot read daemon config", error);
     }
     return {
       dataDir: pluginDataDir(),
@@ -1616,7 +1614,7 @@ export class TaskBoardService {
       this.notify(started, "scheduled");
     } catch (error) {
       console.error(
-        `[agentstorm-task-board] recurring run ${child.id} failed to start`,
+        `[paseo-task-board] recurring run ${child.id} failed to start`,
         error,
       );
       await this.store.transact((doc) => {
