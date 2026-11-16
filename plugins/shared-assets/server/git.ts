@@ -24,7 +24,6 @@ export async function runGit(
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GIT_ASKPASS: "/bin/true",
-        GIT_CONFIG_NOSYSTEM: "1",
         LC_ALL: "C",
       },
       stdio: ["ignore", "pipe", "pipe"],
