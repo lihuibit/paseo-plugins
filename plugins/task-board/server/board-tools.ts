@@ -619,7 +619,8 @@ export function createBoardAdminTools(
 
   const stop = tool(
     "board_stop",
-    "Interrupt the card's current turn and keep the session. The card becomes blocked(manual).",
+    "Cancel the card's current turn and keep the session. Fails when the provider refuses " +
+      "to acknowledge the cancellation; the card is then blocked(manual) with the failure reason.",
     z.object({ taskId: TaskIdSchema }).strict(),
     async (raw, context) => {
       await requireAdmin(context);
@@ -705,7 +706,9 @@ export function createBoardAdminTools(
 
   const send = tool(
     "board_send",
-    "Send a message to a card's bound agent. Optionally wait for the turn to finish (max 300s).",
+    "Send a message to a card's bound agent. If the agent is running or waiting on a question, " +
+      "the current turn is cancelled first; the question stays in history as Interrupted. " +
+      "Optionally wait for the turn to finish (max 300s).",
     z
       .object({
         taskId: TaskIdSchema,
@@ -728,8 +731,8 @@ export function createBoardAdminTools(
       );
       return ok(
         `Sent to ${result.task.displayId}${
-          result.wait ? `; turn ${result.wait.status}` : ""
-        }.`,
+          result.interrupted ? " after interrupting the current turn" : ""
+        }${result.wait ? `; turn ${result.wait.status}` : ""}.`,
         {
           task: summarizeTask(result.task, null),
           wait: result.wait,

@@ -62,7 +62,13 @@ const execution: BoardExecution = {
 
 async function startedTask() {
   const store = new BoardStore();
-  const service = new TaskBoardService(store, new AgentIndex());
+  const service = new TaskBoardService(
+    store,
+    new AgentIndex(),
+    undefined,
+    undefined,
+    async () => undefined,
+  );
   const task = await service.create({ title: "Declare contract" });
   await store.transact((document) => {
     const assigned = assignBoardTask(
@@ -87,6 +93,15 @@ function fakePaseo(): PaseoApi {
   return {
     agents: {
       ref: () => ({
+        refresh: async () => ({
+          agent: {
+            id: "agent_1",
+            status: "idle",
+            pendingPermissions: [],
+            activeTurn: null,
+            archivedAt: null,
+          },
+        }),
         reload: async () => null,
         archive: async () => ({ archivedAt: new Date().toISOString() }),
       }),

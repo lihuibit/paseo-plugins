@@ -186,10 +186,19 @@ paseo-board stop TASK-41
 paseo-board start TASK-41
 ```
 
-`send` adds a turn without changing the card by itself. `--wait` is optional
-and is capped at 300 seconds. `stop` interrupts the current turn and leaves
-the card `blocked(manual)`; `start` resumes the same session. Use `cancel` for
-abandonment, not rework.
+If the Agent is running or stuck on a question, `send` interrupts the current
+turn before delivering the message. The original question is marked
+`Interrupted`; the conversation history is kept, but the model does not
+consider the question answered. `send` on an idle Agent adds a turn directly
+without changing the card. `--wait` is optional and is capped at 300 seconds.
+
+`stop` cancels the current turn and leaves the card `blocked(manual)`.
+`start` resumes the same session. Use `cancel` for abandonment, not rework.
+When the provider refuses to acknowledge the cancellation, `stop` and a
+`send` that needs to interrupt both fail with a readable error; the card stays
+`blocked(manual)` with the reason, and the event log records `stop_failed`
+instead of `stopped`. Resolve the pending question in Paseo or wait for the
+provider, then retry.
 
 ### Accept a card
 
@@ -236,8 +245,9 @@ overriding that id, and it must match the card's binding.
 - `status` is the card plus a live snapshot of its bound Agent. `logs` is the
   Agent timeline tail. `status` answers "is it running, blocked, or waiting for
   permission"; `logs` answers "what did it actually output or do".
-- `pendingPermissions` is not approval. When it is non-empty, a human must
-  resolve the request in the Paseo UI/desktop. The CLI surfaces requests and
+- `pendingPermissions` is not approval. When it is non-empty, `send` interrupts
+  the turn and marks the request `Interrupted`; other permissions still need a
+  human decision in the Paseo UI/desktop. The CLI surfaces requests and
   history, but does not approve or deny them.
 - A blocked card carries `blockReason` (`agent_error`, `agent_silent`,
   `question`, `permission`, `agent_missing`, `human_required`, `manual`) and

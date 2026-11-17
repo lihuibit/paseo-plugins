@@ -87,10 +87,10 @@ labels/metadata 继续被读取，新 Agent 只写 `paseo.*`。
 | `task-board.candidates`          | Project / Workspace / Agent / Provider 候选 |
 | `task-board.assign`              | 记录目标，`start=true` 立即启动             |
 | `task-board.start`               | 新建或继续 Agent                            |
-| `task-board.stop`                | 中断当前 turn，`blocked(manual)`            |
+| `task-board.stop`                | 取消当前 turn，`blocked(manual)`            |
 | `task-board.cancel`              | 取消并归档 Agent，`cancelled` + `final`     |
 | `task-board.unassign`            | 清除执行体，回 `planning`                   |
-| `task-board.send`                | 给绑定 Agent 发消息，可等待 turn 完成       |
+| `task-board.send`                | 先中断运行中的 turn，再给绑定 Agent 发消息  |
 | `task-board.wait`                | 等 review / blocked / idle                  |
 | `task-board.done`                | 管理面：把卡片置为 `done`                   |
 | `task-board.schedule`            | 设置/清除定时或 recurring                   |
@@ -229,7 +229,9 @@ paseo.task-id=<btask_id>
   截断 500 字符，跳过 reasoning，不内联图片。
 - `board_assign` 支持已有 Agent，也支持 `profileId` 或
   `provider/model/modeId/thinkingOptionId` 新建 Agent。
-- `board_send` 的 `waitSeconds` 最大 300；`board_wait` 的 `timeoutMs` 最大 120000。
+- `board_send` 先中断运行中的 turn，再发送消息；原提问记为 `Interrupted`，
+  历史保留但不会被模型视为已回答。`waitSeconds` 最大 300；`board_wait` 的
+  `timeoutMs` 最大 120000。
 
 ### 规划提示词
 
@@ -241,8 +243,15 @@ paseo.task-id=<btask_id>
 
 ## 边界与已知偏差
 
-- Paseo 0.16 的 `PaseoApi` 没有公开 `cancelAgent`。`task-board.stop` 用
-  `agent.reload()` 中断当前 turn（会话与历史保留），卡片立即写 `blocked(manual)`。
+- Paseo 0.16 的 `PaseoApi` 没有公开 `cancelAgent`。插件与 daemon 同机运行，
+  `task-board.stop` 读取 `PASEO_HOME/config.json` 的 `daemon.listen` 和
+  `local-credential`，用一条短连接发送 `cancel_agent_request`；daemon 的
+  `cancelAgentRun` settle turn 后会清空 `pendingPermissions`。这条路径不
+  reload provider session，后续 `send` 会直接开启下一个 turn。取消成功后
+  才写 `stopped`；provider 拒绝取消时返回可读错误，卡片保持
+  `blocked(manual)` 并记录 `stop_failed`。
+- `stop` 的短连接只支持 TCP `daemon.listen`。daemon 使用本地 socket，或需要
+  密码但没有可读的 `local-credential` 时，命令返回可读错误，请在 Paseo 界面处理。
 - UI 用 2.5 秒轮询 `task-board.list`，没有实现 `task-board.watch` 订阅。
 - 看板创建的 Agent 为 `background: false`。Paseo 的 workspace 活动索引跳过
   background agent，只有可见 Agent 才会让 Workspace 行显示运行状态；无人值守仍由

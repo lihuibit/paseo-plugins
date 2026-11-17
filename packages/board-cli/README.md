@@ -113,6 +113,8 @@ paseo-board done TASK-42
 
 `send --wait` 不写秒数时最多等 300 秒；`wait --timeout` 范围 1–120 秒。
 `wait` 超时仍以退出码 0 结束，通过 `--json` 的 `reached: null` 判断。
+若 Agent 正在运行或卡在提问，`send` 会先中断当前 turn 再发送消息；原提问
+记为 `Interrupted`，历史保留但模型不会认为它已被回答。
 
 ## 输出
 
@@ -189,8 +191,9 @@ paseo-board declare TASK-42 progress --summary "正在补测试" --json
 - permission 请求会出现在 `status` 的 `pendingPermissions` 和
   `logs --filter permissions` 中。CLI 当前不自动批准/拒绝权限；需要在 Paseo
   UI/桌面端处理。这样避免外部脚本在无人值守时绕过审批。
-- `stop` 会中断当前 turn 并把卡片置为 `blocked(manual)`；`cancel` 会取消并归档
-  Agent；`done` 只改卡片状态。
+- `stop` 会取消当前 turn 并把卡片置为 `blocked(manual)`；provider 拒绝取消时
+  返回可读错误，事件记为 `stop_failed`，不会假报 `stopped`。`cancel` 会取消并
+  归档 Agent；`done` 只改卡片状态。
 - 不引入 MCP server，不修改 Paseo 源码。
 
 ## 验证

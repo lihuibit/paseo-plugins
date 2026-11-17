@@ -101,6 +101,7 @@ function fakePaseo(
     timeline?: unknown[];
     profiles?: unknown[];
     pendingPermissions?: unknown[];
+    agent?: Record<string, unknown>;
   } = {},
 ) {
   const calls = {
@@ -119,6 +120,7 @@ function fakePaseo(
             ...(options.pendingPermissions === undefined
               ? {}
               : { pendingPermissions: options.pendingPermissions }),
+            ...options.agent,
           }),
         }),
         send: async (text: string) => {
@@ -610,7 +612,9 @@ describe("board tools", () => {
   it("sends messages and waits for the child turn", async () => {
     const store = new BoardStore();
     const service = new TaskBoardService(store, new AgentIndex());
-    const { paseo, calls } = fakePaseo();
+    const { paseo, calls } = fakePaseo({
+      agent: { status: "idle", activeTurn: null },
+    });
     const task = await seedTask(service, store, {
       title: "Child",
       agentId: "agent_child",

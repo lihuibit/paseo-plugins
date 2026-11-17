@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
+import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { BoardError } from "../shared/core/board/errors";
 import {
@@ -78,6 +78,125 @@ import {
 } from "./plugin-data";
 import { BoardSettingsStore } from "./settings";
 import { WeComNotifier, type NotificationEvent } from "./notifier";
+import { cancelAgentViaDaemon } from "./agent-cancel";
+
+export type AgentCanceller = (agentId: string) => Promise<void>;
+
+type CancellableAgentActions = PaseoApi["agents"] & {
+  cancel?: (
+    agentId: string,
+    options?: { requestId?: string },
+  ) => Promise<unknown>;
+};
+
+type CancellableAgentHandle = PaseoAgentHandle & {
+  cancel?: (options?: { requestId?: string }) => Promise<unknown>;
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function pendingPermissionDetails(agent: PaseoAgent): Array<{
+  requestId: string;
+  kind: string;
+  title: string;
+}> {
+  return (agent.pendingPermissions ?? []).map((request) => ({
+    requestId: request.id,
+    kind: request.kind,
+    title: request.title ?? request.name,
+  }));
+}
+
+function cancellationWasRefused(error: unknown): boolean {
+  return /cancellation was not acknowledged|did not acknowledge cancellation|Cannot stop agent/i.test(
+    errorMessage(error),
+  );
+}
+
+function cancelFailure(
+  taskId: string,
+  agentId: string,
+  error: unknown,
+  pending: Array<{ requestId: string; kind: string; title: string }>,
+): BoardError {
+  if (error instanceof BoardError) return error;
+  if (cancellationWasRefused(error) || pending.length > 0) {
+    return new BoardError(
+      "E_AGENT_BLOCKED",
+      `Cannot stop agent ${agentId}: it is waiting for an answer and the current turn could not be interrupted. Answer or dismiss the pending question in Paseo, then retry.`,
+      { taskId, agentId, pendingPermissions: pending },
+    );
+  }
+  return new BoardError(
+    "E_CANCEL_FAILED",
+    `Could not cancel the current turn of agent ${agentId}: ${errorMessage(error)}`,
+    { taskId, agentId },
+  );
+}
+
+/**
+ * Interrupts the agent's active run.
+ *
+ * Paseo 0.16 exposes cancellation through `agent.cancelAgent` on the daemon
+ * client but not through `PaseoApi`. Prefer a native cancel method when the
+ * host grows one; otherwise the daemon client connection supplied by the
+ * plugin process sends the same `cancel_agent_request`. Neither path reloads
+ * the provider session, so a following `send` starts the next turn directly.
+ */
+export async function cancelAgentRun(
+  paseo: PaseoApi,
+  agentId: string,
+  canceller: AgentCanceller,
+): Promise<void> {
+  const agents = paseo.agents as CancellableAgentActions;
+  if (typeof agents.cancel === "function") {
+    await agents.cancel(agentId);
+    return;
+  }
+  const handle = paseo.agents.ref(agentId) as CancellableAgentHandle;
+  if (typeof handle.cancel === "function") {
+    await handle.cancel();
+    return;
+  }
+  await canceller(agentId);
+}
+
+async function readStoppedAgent(
+  paseo: PaseoApi,
+  agentId: string,
+): Promise<PaseoAgent> {
+  const refreshed = await paseo.agents.ref(agentId).refresh();
+  if (!refreshed || refreshed.agent.archivedAt) {
+    throw new BoardError("E_AGENT_MISSING", "The bound agent is missing", {
+      agentId,
+    });
+  }
+  return refreshed.agent;
+}
+
+function assertAgentStopped(
+  taskId: string,
+  agentId: string,
+  agent: PaseoAgent,
+): void {
+  const pending = pendingPermissionDetails(agent);
+  if (agent.status === "running" || pending.length > 0) {
+    throw new BoardError(
+      "E_AGENT_BLOCKED",
+      `Cannot stop agent ${agentId}: it is still running${
+        pending.length > 0 ? " with a pending question" : ""
+      }. Answer or dismiss the pending request in Paseo, then retry.`,
+      {
+        taskId,
+        agentId,
+        lifecycle: agent.status,
+        pendingPermissions: pending,
+      },
+    );
+  }
+}
 
 async function readJsonFile(path: string): Promise<unknown | null> {
   try {
@@ -151,6 +270,7 @@ export class TaskBoardService {
     private readonly index: AgentIndex,
     settings?: BoardSettingsStore,
     notifier?: WeComNotifier,
+    private readonly cancelAgent: AgentCanceller = cancelAgentViaDaemon,
   ) {
     this.settings = settings ?? new BoardSettingsStore();
     this.notifier = notifier ?? new WeComNotifier(this.settings);
@@ -659,19 +779,49 @@ export class TaskBoardService {
   async stop(paseo: PaseoApi, taskId: string): Promise<BoardTask> {
     return this.withTaskLock(taskId, async () => {
       const now = new Date().toISOString();
-      const task = await this.store.transact((document) => {
+      const stopped = await this.store.transact((document) => {
         const outcome = markStopRequested(document, taskId, now);
         return { document: outcome.document, result: outcome.task };
       });
-      const agentId = task.execution?.agentId;
+      const agentId = stopped.execution?.agentId;
       if (agentId) {
         try {
-          await paseo.agents.ref(agentId).reload();
+          await cancelAgentRun(paseo, agentId, this.cancelAgent);
+          const agent = await readStoppedAgent(paseo, agentId);
+          assertAgentStopped(taskId, agentId, agent);
         } catch (error) {
+          const refreshed = await readStoppedAgent(paseo, agentId).catch(
+            () => null,
+          );
+          const failure = cancelFailure(
+            taskId,
+            agentId,
+            error,
+            refreshed ? pendingPermissionDetails(refreshed) : [],
+          );
+          const failedAt = new Date().toISOString();
+          await this.store.transact((document) => {
+            const outcome = applyBlocked(
+              document,
+              taskId,
+              "manual",
+              failure.message,
+              "stop",
+              failedAt,
+            );
+            return { document: outcome.document, result: outcome.task };
+          });
+          await appendEvent({
+            at: failedAt,
+            kind: "stop_failed",
+            taskId,
+            detail: { agentId, reason: failure.message },
+          });
           console.error(
-            `[paseo-task-board] could not interrupt ${agentId}`,
+            `[paseo-task-board] could not cancel ${agentId}`,
             error,
           );
+          throw failure;
         }
       }
       await appendEvent({
@@ -810,6 +960,7 @@ export class TaskBoardService {
   ): Promise<{
     task: BoardTask;
     wait: Awaited<ReturnType<PaseoAgentHandle["waitForFinish"]>> | null;
+    interrupted: boolean;
   }> {
     const task = await this.get(taskId);
     const agentId = task.execution?.agentId;
@@ -828,10 +979,109 @@ export class TaskBoardService {
         agentId,
       });
     }
-    await handle.send(message);
+
+    const pending = refreshed.agent.pendingPermissions ?? [];
+    const running =
+      refreshed.agent.status === "running" ||
+      Boolean(refreshed.agent.activeTurn);
+    let interrupted = false;
+    if (running || pending.length > 0) {
+      const stopAt = new Date().toISOString();
+      await this.store.transact((document) => {
+        const outcome = markStopRequested(document, taskId, stopAt);
+        return { document: outcome.document, result: outcome.task };
+      });
+      try {
+        await cancelAgentRun(paseo, agentId, this.cancelAgent);
+        const agent = await readStoppedAgent(paseo, agentId);
+        assertAgentStopped(taskId, agentId, agent);
+      } catch (error) {
+        const current = await readStoppedAgent(paseo, agentId).catch(
+          () => null,
+        );
+        const failure = cancelFailure(
+          taskId,
+          agentId,
+          error,
+          current
+            ? pendingPermissionDetails(current)
+            : pendingPermissionDetails(refreshed.agent),
+        );
+        const failedAt = new Date().toISOString();
+        await this.store.transact((document) => {
+          const outcome = applyBlocked(
+            document,
+            taskId,
+            "manual",
+            failure.message,
+            "send",
+            failedAt,
+          );
+          return { document: outcome.document, result: outcome.task };
+        });
+        await appendEvent({
+          at: failedAt,
+          kind: "stop_failed",
+          taskId,
+          detail: { agentId, source: "send", reason: failure.message },
+        });
+        throw failure;
+      }
+      interrupted = true;
+    }
+
+    try {
+      await handle.send(message);
+    } catch (error) {
+      const reason = errorMessage(error);
+      const failedAt = new Date().toISOString();
+      await this.store.transact((document) => {
+        const outcome = applyBlocked(
+          document,
+          taskId,
+          "manual",
+          `send failed: ${reason}`,
+          "send",
+          failedAt,
+        );
+        return { document: outcome.document, result: outcome.task };
+      });
+      await appendEvent({
+        at: failedAt,
+        kind: "send_failed",
+        taskId,
+        detail: { agentId, reason },
+      });
+      if (/cancellation was not acknowledged/i.test(reason)) {
+        throw new BoardError(
+          "E_AGENT_BLOCKED",
+          `Cannot send to agent ${agentId}: its current turn is still running. Stop the task or wait for the turn to finish, then retry.`,
+          { taskId, agentId, reason },
+        );
+      }
+      throw new BoardError("E_CANCEL_FAILED", "Could not send the message", {
+        taskId,
+        agentId,
+        reason,
+      });
+    }
+
+    if (interrupted) {
+      const resumedAt = new Date().toISOString();
+      await this.store.transact((document) => {
+        const outcome = syncTurnBefore(document, taskId, null, resumedAt);
+        return { document: outcome.document, result: outcome.task };
+      });
+      await appendEvent({
+        at: resumedAt,
+        kind: "sent",
+        taskId,
+        detail: { agentId, interrupted: true },
+      });
+    }
     const wait =
       waitSeconds > 0 ? await handle.waitForFinish(waitSeconds * 1_000) : null;
-    return { task: await this.get(taskId), wait };
+    return { task: await this.get(taskId), wait, interrupted };
   }
 
   async waitForTask(
