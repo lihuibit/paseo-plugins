@@ -186,11 +186,19 @@ paseo-board stop TASK-41
 paseo-board start TASK-41
 ```
 
-If the Agent is running or stuck on a question, `send` interrupts the current
-turn before delivering the message. The original question is marked
-`Interrupted`; the conversation history is kept, but the model does not
-consider the question answered. `send` on an idle Agent adds a turn directly
-without changing the card. `--wait` is optional and is capped at 300 seconds.
+When a question is pending, `send` answers it with the message and the turn
+continues. The CLI maps the answer to the provider's expected keys (codex
+`Question 1`…`Question N`, claude full question text, pi header); you only
+provide the answer text. Multi-question requests need one answer per line, or
+one answer per paragraph when an answer itself spans lines.
+
+If the answer cannot be delivered (a multi-question message cannot be split,
+an option-only question does not match, or the provider does not support
+question answers), `send` falls back to one cancel and polls for up to about
+15 seconds, then sends the message. The original question is then marked
+`Interrupted`; history is kept but the model does not consider it answered.
+`send` on an idle Agent adds a turn directly without changing the card.
+`--wait` is optional and is capped at 300 seconds.
 
 `stop` cancels the current turn and leaves the card `blocked(manual)`.
 `start` resumes the same session. Use `cancel` for abandonment, not rework.
@@ -245,10 +253,10 @@ overriding that id, and it must match the card's binding.
 - `status` is the card plus a live snapshot of its bound Agent. `logs` is the
   Agent timeline tail. `status` answers "is it running, blocked, or waiting for
   permission"; `logs` answers "what did it actually output or do".
-- `pendingPermissions` is not approval. When it is non-empty, `send` interrupts
-  the turn and marks the request `Interrupted`; other permissions still need a
-  human decision in the Paseo UI/desktop. The CLI surfaces requests and
-  history, but does not approve or deny them.
+- `pendingPermissions` is not approval. A pending question is answered by
+  `send`; other permissions (tools, plans, modes) still need a human decision
+  in the Paseo UI/desktop. The CLI surfaces requests and history, but does not
+  approve or deny them.
 - A blocked card carries `blockReason` (`agent_error`, `agent_silent`,
   `question`, `permission`, `agent_missing`, `human_required`, `manual`) and
   `blockDetail`. `stop` produces `blocked(manual)`; a pending permission

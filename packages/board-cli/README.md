@@ -113,8 +113,10 @@ paseo-board done TASK-42
 
 `send --wait` 不写秒数时最多等 300 秒；`wait --timeout` 范围 1–120 秒。
 `wait` 超时仍以退出码 0 结束，通过 `--json` 的 `reached: null` 判断。
-若 Agent 正在运行或卡在提问，`send` 会先中断当前 turn 再发送消息；原提问
-记为 `Interrupted`，历史保留但模型不会认为它已被回答。
+若 Agent 卡在提问，`send` 会把消息作为答案提交并让 turn 继续；多题时按行
+或段落提供答案。只有答案无法提交时才回退到一次 cancel + 最多约 15 秒轮询，
+然后发送消息；此时原提问记为 `Interrupted`，历史保留但模型不会认为它已被
+回答。
 
 ## 输出
 

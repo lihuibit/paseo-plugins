@@ -38,6 +38,13 @@ interface TestSession {
   activeForegroundTurnId: string | null;
   pendingPermissions: unknown[];
   emitEvent(event: unknown): Promise<void>;
+  respondToPermission(
+    requestId: string,
+    response: {
+      behavior: string;
+      updatedInput?: { answers?: Record<string, string> };
+    },
+  ): Promise<void>;
   startTurn?: (prompt: string) => Promise<{ turnId: string }>;
   interrupt?: () => Promise<void>;
 }
@@ -143,13 +150,24 @@ async function seed(store: BoardStore, agentId: string, provider: string) {
 function questionClient(
   createTestAgentClient: (provider: string) => TestAgentClient,
   provider: string,
+  options: {
+    questions?: Array<Record<string, unknown>>;
+    interruptDelayMs?: number;
+    refuseInterrupt?: boolean;
+  } = {},
 ) {
   const base = createTestAgentClient(provider);
   const state = {
     questions: 0,
     starts: 0,
     prompts: [] as string[],
-    refuseInterrupt: false,
+    answers: [] as Array<{
+      requestId: string;
+      answers: Record<string, string> | undefined;
+    }>,
+    interrupts: 0,
+    aborted: false,
+    refuseInterrupt: options.refuseInterrupt ?? false,
   };
   const wrap = (session: TestSession): TestSession => {
     let request: (Record<string, unknown> & { id: string }) | null = null;
@@ -173,7 +191,7 @@ function questionClient(
           kind: "question",
           title: "Question",
           input: {
-            questions: [
+            questions: options.questions ?? [
               {
                 id: "0",
                 header: "Question 1",
@@ -208,8 +226,42 @@ function questionClient(
       }
       return { turnId };
     };
+    session.respondToPermission = async (requestId, response) => {
+      state.answers.push({
+        requestId,
+        answers: response.updatedInput?.answers,
+      });
+      session.pendingPermissions = [];
+      await session.emitEvent({
+        type: "permission_resolved",
+        provider,
+        requestId,
+        resolution: response,
+      });
+      await session.emitEvent({
+        type: "timeline",
+        provider,
+        item: {
+          type: "assistant_message",
+          text: "answered",
+          messageId: `${provider}-answered`,
+        },
+      });
+      await session.emitEvent({
+        type: "turn_completed",
+        provider,
+        usage: { inputTokens: 1, outputTokens: 1 },
+      });
+      session.activeForegroundTurnId = null;
+    };
     session.interrupt = async () => {
+      state.interrupts += 1;
       if (state.refuseInterrupt) throw new Error("Provider ignored interrupt");
+      if (options.interruptDelayMs) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, options.interruptDelayMs),
+        );
+      }
       if (request) {
         await session.emitEvent({
           type: "permission_resolved",
@@ -228,6 +280,7 @@ function questionClient(
         provider,
         reason: "interrupted",
       });
+      state.aborted = true;
       session.activeForegroundTurnId = null;
     };
     return session;
@@ -317,12 +370,174 @@ describeDaemon("isolated daemon cancel", () => {
     30_000,
   );
 
-  it("send interrupts a pending question and continues the conversation", async () => {
+  it.each([
+    [
+      "codex",
+      {
+        id: "0",
+        header: "Question 1",
+        question: "Which branch?",
+        options: [{ label: "main" }, { label: "dev" }],
+        isOther: true,
+      },
+      { "Question 1": "dev" },
+    ],
+    [
+      "claude",
+      {
+        header: "Branch",
+        question: "Which branch?",
+        options: [{ label: "main" }, { label: "dev" }],
+        allowOther: true,
+      },
+      { "Which branch?": "dev" },
+    ],
+    [
+      "pi",
+      {
+        header: "Branch",
+        question: "Which branch?",
+        options: [{ label: "main" }, { label: "dev" }],
+        allowOther: true,
+      },
+      { Branch: "dev" },
+    ],
+  ])(
+    "send answers a pending %s question without cancelling",
+    async (provider, question, expectedAnswers) => {
+      const { createTestPaseoDaemon, createTestAgentClient } =
+        await loadTestUtils();
+      const { client: fakeClient, state } = questionClient(
+        createTestAgentClient,
+        provider,
+        { questions: [question] },
+      );
+      const daemon = await createTestPaseoDaemon({
+        agentClients: { [provider]: fakeClient },
+        mcpEnabled: false,
+        isDev: true,
+      });
+      daemon.daemon.agentManager.rescueTimeouts.interruptSessionMs = 200;
+      const client = new DaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: `i22-answer-${provider}`,
+        reconnect: { enabled: false },
+      });
+      try {
+        await client.connect();
+        const paseo = createPaseoApi(client);
+        const handle = await paseo.agents.create({
+          config: { provider: `${provider}/test-model`, modeId: "default" },
+          cwd: home,
+          title: "question agent",
+        });
+        await handle.send("ask me");
+        await waitForQuestion(handle);
+
+        const store = new BoardStore();
+        const service = new TaskBoardService(
+          store,
+          new AgentIndex(),
+          undefined,
+          undefined,
+          (agentId) => client.cancelAgent(agentId),
+        );
+        await seed(store, handle.id, provider);
+        const result = await service.sendMessage(paseo, "btask_daemon", "dev");
+        const refreshed = await handle.refresh();
+
+        expect(result.answered).toBe(true);
+        expect(result.interrupted).toBe(false);
+        expect(result.task.status).toBe("in_progress");
+        expect(refreshed?.agent.pendingPermissions).toEqual([]);
+        expect(state.answers).toEqual([
+          {
+            requestId: `${provider}-question-1`,
+            answers: expectedAnswers,
+          },
+        ]);
+        expect(state.interrupts).toBe(0);
+        expect(state.starts).toBe(1);
+      } finally {
+        await client.close();
+        await daemon.close();
+      }
+    },
+    30_000,
+  );
+
+  it("pi answer path leaves the delayed abort untouched", async () => {
+    const { createTestPaseoDaemon, createTestAgentClient } =
+      await loadTestUtils();
+    const { client: fakeClient, state } = questionClient(
+      createTestAgentClient,
+      "pi",
+      {
+        interruptDelayMs: 100,
+        questions: [
+          {
+            header: "Branch",
+            question: "Which branch?",
+            options: [{ label: "main" }, { label: "dev" }],
+            allowOther: true,
+          },
+        ],
+      },
+    );
+    const daemon = await createTestPaseoDaemon({
+      agentClients: { pi: fakeClient },
+      mcpEnabled: false,
+      isDev: true,
+    });
+    daemon.daemon.agentManager.rescueTimeouts.interruptSessionMs = 200;
+    const client = new DaemonClient({
+      url: `ws://127.0.0.1:${daemon.port}/ws`,
+      clientId: "i22-pi-answer",
+      reconnect: { enabled: false },
+    });
+    try {
+      await client.connect();
+      const paseo = createPaseoApi(client);
+      const handle = await paseo.agents.create({
+        config: { provider: "pi/test-model", modeId: "default" },
+        cwd: home,
+        title: "question agent",
+      });
+      await handle.send("ask me");
+      await waitForQuestion(handle);
+      const store = new BoardStore();
+      const service = new TaskBoardService(
+        store,
+        new AgentIndex(),
+        undefined,
+        undefined,
+        (agentId) => client.cancelAgent(agentId),
+      );
+      await seed(store, handle.id, "pi");
+      const result = await service.sendMessage(paseo, "btask_daemon", "dev");
+      expect(result.answered).toBe(true);
+      expect(state.interrupts).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(state.aborted).toBe(false);
+    } finally {
+      await client.close();
+      await daemon.close();
+    }
+  }, 30_000);
+
+  it("an unanswerable question falls back to one cancel, polling, then send", async () => {
     const { createTestPaseoDaemon, createTestAgentClient } =
       await loadTestUtils();
     const { client: fakeClient, state } = questionClient(
       createTestAgentClient,
       "codex",
+      {
+        interruptDelayMs: 300,
+        questions: [
+          { header: "Question 1", question: "Which branch?" },
+          { header: "Question 2", question: "Which command?" },
+        ],
+      },
     );
     const daemon = await createTestPaseoDaemon({
       agentClients: { codex: fakeClient },
@@ -332,7 +547,7 @@ describeDaemon("isolated daemon cancel", () => {
     daemon.daemon.agentManager.rescueTimeouts.interruptSessionMs = 200;
     const client = new DaemonClient({
       url: `ws://127.0.0.1:${daemon.port}/ws`,
-      clientId: "i22-send",
+      clientId: "i22-fallback-send",
       reconnect: { enabled: false },
     });
     try {
@@ -345,7 +560,6 @@ describeDaemon("isolated daemon cancel", () => {
       });
       await handle.send("ask me");
       await waitForQuestion(handle);
-
       const store = new BoardStore();
       const service = new TaskBoardService(
         store,
@@ -353,6 +567,7 @@ describeDaemon("isolated daemon cancel", () => {
         undefined,
         undefined,
         (agentId) => client.cancelAgent(agentId),
+        2_000,
       );
       await seed(store, handle.id, "codex");
       const result = await service.sendMessage(
@@ -360,34 +575,13 @@ describeDaemon("isolated daemon cancel", () => {
         "btask_daemon",
         "use dev",
       );
-      const refreshed = await handle.refresh();
-
+      expect(result.answered).toBe(false);
       expect(result.interrupted).toBe(true);
       expect(result.task.status).toBe("in_progress");
-      expect(refreshed?.agent.pendingPermissions).toEqual([]);
-      for (let attempt = 0; attempt < 40 && state.starts < 2; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      if (state.starts < 2) {
-        const later = await handle.refresh();
-        console.log("send state", {
-          starts: state.starts,
-          prompts: state.prompts,
-          status: later?.agent.status,
-          pending: later?.agent.pendingPermissions,
-          activeTurn: later?.agent.activeTurn,
-        });
-        await handle.send("direct retry");
-        for (let attempt = 0; attempt < 40 && state.starts < 2; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        console.log("direct retry state", {
-          starts: state.starts,
-          prompts: state.prompts,
-          status: (await handle.refresh())?.agent.status,
-        });
-      }
+      expect(state.answers).toEqual([]);
+      expect(state.interrupts).toBe(1);
       expect(state.starts).toBe(2);
+      expect(state.prompts).toEqual(["ask me", "use dev"]);
     } finally {
       await client.close();
       await daemon.close();
@@ -452,8 +646,14 @@ describeDaemon("isolated daemon cancel", () => {
     const { client: fakeClient, state } = questionClient(
       createTestAgentClient,
       "claude",
+      {
+        refuseInterrupt: true,
+        questions: [
+          { header: "Branch", question: "Which branch?" },
+          { header: "Command", question: "Which command?" },
+        ],
+      },
     );
-    state.refuseInterrupt = true;
     const daemon = await createTestPaseoDaemon({
       agentClients: { claude: fakeClient },
       mcpEnabled: false,
@@ -483,14 +683,17 @@ describeDaemon("isolated daemon cancel", () => {
         undefined,
         undefined,
         (agentId) => client.cancelAgent(agentId),
+        800,
       );
       await seed(store, handle.id, "claude");
       await expect(
         service.sendMessage(paseo, "btask_daemon", "use dev"),
       ).rejects.toMatchObject({
         code: "E_AGENT_BLOCKED",
-        message: expect.stringContaining("waiting for an answer"),
+        message: expect.stringContaining("Cannot interrupt agent"),
       });
+      expect(state.answers).toEqual([]);
+      expect(state.interrupts).toBe(1);
       const task = await service.get("btask_daemon");
       expect(task.status).toBe("blocked");
       expect(task.blockReason).toBe("manual");

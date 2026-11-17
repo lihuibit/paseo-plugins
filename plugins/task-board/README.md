@@ -90,7 +90,7 @@ labels/metadata 继续被读取，新 Agent 只写 `paseo.*`。
 | `task-board.stop`                | 取消当前 turn，`blocked(manual)`            |
 | `task-board.cancel`              | 取消并归档 Agent，`cancelled` + `final`     |
 | `task-board.unassign`            | 清除执行体，回 `planning`                   |
-| `task-board.send`                | 先中断运行中的 turn，再给绑定 Agent 发消息  |
+| `task-board.send`                | 优先回答 pending question，否则中断再发送   |
 | `task-board.wait`                | 等 review / blocked / idle                  |
 | `task-board.done`                | 管理面：把卡片置为 `done`                   |
 | `task-board.schedule`            | 设置/清除定时或 recurring                   |
@@ -229,9 +229,11 @@ paseo.task-id=<btask_id>
   截断 500 字符，跳过 reasoning，不内联图片。
 - `board_assign` 支持已有 Agent，也支持 `profileId` 或
   `provider/model/modeId/thinkingOptionId` 新建 Agent。
-- `board_send` 先中断运行中的 turn，再发送消息；原提问记为 `Interrupted`，
-  历史保留但不会被模型视为已回答。`waitSeconds` 最大 300；`board_wait` 的
-  `timeoutMs` 最大 120000。
+- `board_send` 优先把消息作为 pending question 的答案：codex 用
+  `Question 1`…`Question N`，claude 用问题全文，pi 用 header；多题按行/段落
+  切分。回答不可行时才发一次 cancel、轮询最多约 15 秒，再发送消息；原提问
+  记为 `Interrupted`，历史保留但不会被模型视为已回答。`waitSeconds` 最大
+  300；`board_wait` 的 `timeoutMs` 最大 120000。
 
 ### 规划提示词
 

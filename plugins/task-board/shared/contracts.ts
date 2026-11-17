@@ -659,6 +659,7 @@ export const sendRpc = defineRpc({
       .object({
         task: TaskSummarySchema,
         wait: WaitForFinishResultSchema.nullable(),
+        answered: z.boolean().optional(),
       })
       .strict(),
   ),

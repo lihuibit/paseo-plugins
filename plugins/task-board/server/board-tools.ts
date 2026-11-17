@@ -706,9 +706,9 @@ export function createBoardAdminTools(
 
   const send = tool(
     "board_send",
-    "Send a message to a card's bound agent. If the agent is running or waiting on a question, " +
-      "the current turn is cancelled first; the question stays in history as Interrupted. " +
-      "Optionally wait for the turn to finish (max 300s).",
+    "Send a message to a card's bound agent. When a question is pending, the message answers it " +
+      "and the turn continues; otherwise a running turn is cancelled first. Optional wait is " +
+      "capped at 300s.",
     z
       .object({
         taskId: TaskIdSchema,
@@ -730,9 +730,13 @@ export function createBoardAdminTools(
         input.waitSeconds,
       );
       return ok(
-        `Sent to ${result.task.displayId}${
-          result.interrupted ? " after interrupting the current turn" : ""
-        }${result.wait ? `; turn ${result.wait.status}` : ""}.`,
+        result.answered
+          ? `Answered the pending question on ${result.task.displayId}${
+              result.wait ? `; turn ${result.wait.status}` : ""
+            }.`
+          : `Sent to ${result.task.displayId}${
+              result.interrupted ? " after interrupting the current turn" : ""
+            }${result.wait ? `; turn ${result.wait.status}` : ""}.`,
         {
           task: summarizeTask(result.task, null),
           wait: result.wait,

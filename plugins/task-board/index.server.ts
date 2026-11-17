@@ -270,6 +270,7 @@ export default function contribute(server: PluginServerContext) {
       return {
         task: summarizeTask(result.task, null),
         wait: result.wait,
+        answered: result.answered,
       };
     });
   });

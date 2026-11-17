@@ -131,7 +131,7 @@ const COMMAND_HELP: Record<string, string> = {
   cancel: "paseo-board cancel TASK-x [--json]",
   unassign: "paseo-board unassign TASK-x [--json]",
   done: "paseo-board done TASK-x [--json]",
-  send: 'paseo-board send TASK-x "message" [--wait [seconds]] [--json]  (cancels a running turn first)',
+  send: 'paseo-board send TASK-x "message" [--wait [seconds]] [--json]  (answers a pending question first)',
   wait: "paseo-board wait TASK-x [--until review|blocked|idle] [--timeout seconds] [--json]",
   profiles: "paseo-board profiles [--json]",
   providers: "paseo-board providers [--provider P] [--cwd PATH] [--json]",
@@ -708,6 +708,7 @@ const send: Handler = async (ctx, client) => {
   const result = await call<{
     task: TaskSummary;
     interrupted?: boolean;
+    answered?: boolean;
     wait: {
       status: string;
       lastMessage: string | null;
@@ -721,9 +722,11 @@ const send: Handler = async (ctx, client) => {
   if (ctx.json) emitJson(ctx.io, result);
   else {
     ctx.io.stdout(
-      `Sent to ${result.task.displayId}${
-        result.interrupted ? " after interrupting the current turn" : ""
-      }.\n`,
+      result.answered
+        ? `Answered the pending question on ${result.task.displayId}.\n`
+        : `Sent to ${result.task.displayId}${
+            result.interrupted ? " after interrupting the current turn" : ""
+          }.\n`,
     );
     if (result.wait) {
       ctx.io.stdout(
