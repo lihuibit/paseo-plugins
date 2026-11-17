@@ -65,7 +65,12 @@ export async function writeJson(path: string, value: unknown): Promise<void> {
  */
 export async function scanFiles(
   root: string,
-  options: { maxFiles?: number; maxBytes?: number; maxFileBytes?: number } = {},
+  options: {
+    maxFiles?: number;
+    maxBytes?: number;
+    maxFileBytes?: number;
+    isIgnored?: (relativePath: string) => boolean;
+  } = {},
 ): Promise<ScannedFile[]> {
   const maxFiles = options.maxFiles ?? MAX_PACKAGE_FILES;
   const maxBytes = options.maxBytes ?? MAX_PACKAGE_BYTES;
@@ -89,6 +94,7 @@ export async function scanFiles(
       // counted, projected, diffed or published as one.
       const relativePath = relative(root, absolute).split("\\").join("/");
       if (isCredentialPath(relativePath)) continue;
+      if (options.isIgnored?.(relativePath)) continue;
       const info = await stat(absolute);
       if (info.size > maxFileBytes) {
         throw new Error(`file exceeds ${maxFileBytes} bytes: ${relativePath}`);

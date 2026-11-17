@@ -13,6 +13,8 @@ import { readConfig } from "./registry";
 import { repoDir } from "./plugin-data";
 import { resolveAsset, scanAllAssets } from "./repo";
 import { scanFiles, fileExists } from "./fs-utils";
+import { isFileIgnored, readSharedIgnoreRules } from "./ignore";
+import type { IgnoreRule } from "../shared/core/ignore";
 
 export interface LocalAssetFile {
   relativePath: string;
@@ -42,10 +44,13 @@ export function parseProvider(value: string | undefined): ProviderId | null {
   return value;
 }
 
-async function listRelativeFiles(root: string): Promise<string[]> {
+async function listRelativeFiles(
+  root: string,
+  isIgnored?: (relativePath: string) => boolean,
+): Promise<string[]> {
   if (!(await fileExists(root))) return [];
   try {
-    const scanned = await scanFiles(root);
+    const scanned = await scanFiles(root, { isIgnored });
     return scanned.map((file) => file.path);
   } catch {
     return [];
@@ -84,6 +89,7 @@ export async function resolveAssetForWorkspace(input: {
     );
   }
   const provider = parseProvider(input.provider);
+  const rules = (await readSharedIgnoreRules(input.projectId)).rules;
 
   let localRoot: string;
   let repositoryRoot: string;
@@ -142,7 +148,13 @@ export async function resolveAssetForWorkspace(input: {
       targetPath: localRoot,
       localRoot,
       repositoryRoot,
-      files: await buildFiles(asset, repositoryRoot, localRoot, relative),
+      files: await buildFiles(
+        asset,
+        repositoryRoot,
+        localRoot,
+        relative,
+        rules,
+      ),
     };
   }
 
@@ -156,7 +168,7 @@ export async function resolveAssetForWorkspace(input: {
         : join(localRoot, relative ?? ""),
     localRoot,
     repositoryRoot,
-    files: await buildFiles(asset, repositoryRoot, localRoot, relative),
+    files: await buildFiles(asset, repositoryRoot, localRoot, relative, rules),
   };
 }
 
@@ -165,6 +177,7 @@ async function buildFiles(
   repositoryRoot: string,
   localRoot: string,
   relative: string | null,
+  rules: IgnoreRule[],
 ): Promise<LocalAssetFile[]> {
   let relatives: string[];
   if (relative) {
@@ -172,12 +185,14 @@ async function buildFiles(
   } else if (asset.kind === "prompt" || asset.kind === "knowledge") {
     relatives = [asset.files[0]?.path ?? "AGENTS.md"];
   } else {
+    const isIgnored = (entry: string) => isFileIgnored(asset, entry, rules);
     const [remote, local] = await Promise.all([
-      listRelativeFiles(repositoryRoot),
-      listRelativeFiles(localRoot),
+      listRelativeFiles(repositoryRoot, isIgnored),
+      listRelativeFiles(localRoot, isIgnored),
     ]);
     relatives = [...new Set([...remote, ...local])].sort();
   }
+  relatives = relatives.filter((entry) => !isFileIgnored(asset, entry, rules));
   const base =
     asset.kind === "prompt"
       ? ""

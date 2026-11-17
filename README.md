@@ -263,7 +263,12 @@ drift 按文件比较上次基线、项目 `.paseo/` 或 Provider 投影副本�
 - `workspace.pull` 把共享 Prompt/Knowledge/Doc 同步到当前 Workspace；只更新基线未变
   的文件，本地改动保留。
 - 共享规则保存在 checkout 的 `ignore-rules`，支持 `path:<glob>`、`kind:<kind>`、
-  `asset:<assetId>` 和裸路径，通过 `ignore.rules.set` 编辑并提交。
+  `asset:<assetId>` 和裸路径，通过 `ignore.rules.set` 编辑并提交。`path:` 与裸路径
+  同时按文件规则生效：`*`、`?`、`[abc]`、`dir/`、`/anchored`、`!negation` 均支持，
+  未锚定的 `*.pyc`、`__pycache__/` 可命中任意层级；文件规则不支持 `**`，含 `**`
+  的规则只保留原有资产级 glob 语义。
+- 忽略规则在本地与共享两侧同时过滤，drift、relationship、单条/批量发布预览与提交
+  结果一致；被忽略文件不会产生差异，也不会被提交。
 - 单条 drift 忽略保存在 Workspace 根 `shared-library-ignores.json`，解绑后保留。
 
 ### `.agentstorm/` → `.paseo/` 一次性迁移

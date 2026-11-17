@@ -5,6 +5,7 @@ import { parseSkillFrontmatter } from "../shared/core/skill-markdown";
 import type { PublishCommitResult, PublishPreview } from "../shared/core/types";
 import { atomicWriteFile, MAX_FILE_BYTES } from "./fs-utils";
 import { assertGitIdentity, headRevision, runGit } from "./git";
+import { isFileIgnored, isRuleIgnored, readSharedIgnoreRules } from "./ignore";
 import { repoDir } from "./plugin-data";
 import { resolvePublishTarget } from "./repo";
 
@@ -26,6 +27,19 @@ async function validate(input: PublishInput) {
     input.assetId,
     input.path,
   );
+  const rules = (await readSharedIgnoreRules(input.projectId)).rules;
+  const relativePath = target.repositoryPath.startsWith(`${target.asset.path}/`)
+    ? target.repositoryPath.slice(target.asset.path.length + 1)
+    : (target.repositoryPath.split("/").pop() ?? target.repositoryPath);
+  if (
+    isRuleIgnored(target.asset, rules) ||
+    isFileIgnored(target.asset, relativePath, rules)
+  ) {
+    throw new PluginError(
+      "E_VALIDATION_FAILED",
+      `Path is ignored by the shared ignore rules: ${target.repositoryPath}`,
+    );
+  }
   const size = Buffer.byteLength(input.content, "utf8");
   if (size > MAX_FILE_BYTES) {
     throw new PluginError(

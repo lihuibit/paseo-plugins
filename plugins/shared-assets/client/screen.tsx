@@ -5098,10 +5098,11 @@ function IgnoreRulesDialog({
               fontSize: tokens.fontSize.sm,
             }}
           >
-            每行一条规则，语法与 .gitignore 相同：`__pycache__/`
-            匹配任意层级的目录， `*.pyc` 匹配任意层级的文件，`/dist`
-            只匹配资产根目录，`!name` 表示例外。
-            命中的文件不会出现在发布清单和差异对比中。
+            每行一条规则，文件规则使用 .gitignore 子集：`__pycache__/`、`dir/`
+            匹配任意层级的目录，`*.pyc` 匹配任意层级的文件，`/dist`
+            只匹配资产根目录，`!name` 表示例外；不支持 `**`。也支持
+            `path:`、`kind:`、`asset:` 资产级规则。命中的文件不会出现在差异、
+            发布清单或提交中。
           </Text>
           <TextField
             value={raw}

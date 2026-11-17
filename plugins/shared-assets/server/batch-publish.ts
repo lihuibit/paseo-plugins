@@ -2,6 +2,7 @@ import { lstat, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PluginError } from "../shared/core/errors";
 import { unifiedDiff } from "../shared/core/diff";
+import type { IgnoreRule } from "../shared/core/ignore";
 import {
   parseDocAssetId,
   parseKnowledgeAssetId,
@@ -26,7 +27,7 @@ import {
   scanFiles,
 } from "./fs-utils";
 import { assertGitIdentity, headRevision, runGit } from "./git";
-import { readSharedIgnoreRules, isRuleIgnored } from "./ignore";
+import { isFileIgnored, isRuleIgnored, readSharedIgnoreRules } from "./ignore";
 import { repoDir } from "./plugin-data";
 import { resolveAsset, scanPrompt } from "./repo";
 import { validatePublishContent, validatePublishPath } from "./validation";
@@ -114,6 +115,7 @@ async function creationPlan(input: {
   selection: BatchSelection;
   workspaceDirectory: string;
   checkout: string;
+  rules: IgnoreRule[];
 }): Promise<CreationPlan> {
   const kind = input.selection.kind;
   if (!kind) {
@@ -135,6 +137,18 @@ async function creationPlan(input: {
       throw new PluginError(
         "E_ASSET_NOT_FOUND",
         `The project has no ${PROJECT_DIR}/AGENTS.md to publish`,
+      );
+    }
+    if (
+      isFileIgnored(
+        { assetId: "prompt", kind, path: "AGENTS.md" },
+        "AGENTS.md",
+        input.rules,
+      )
+    ) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        "AGENTS.md is ignored by the shared ignore rules",
       );
     }
     const asset = pseudoAsset({
@@ -190,14 +204,25 @@ async function creationPlan(input: {
     }
     const localRoot = join(input.workspaceDirectory, skillRoot, parsed.name);
     await resolveInside(input.workspaceDirectory, localRoot);
-    const scanned = await scanFiles(localRoot);
+    const repositoryRootPath = `skills/project/${parsed.name}`;
+    const scanned = await scanFiles(localRoot, {
+      isIgnored: (entry) =>
+        isFileIgnored(
+          {
+            assetId: input.selection.assetId,
+            kind,
+            path: repositoryRootPath,
+          },
+          entry,
+          input.rules,
+        ),
+    });
     if (scanned.length === 0) {
       throw new PluginError(
         "E_VALIDATION_FAILED",
         `Skill has no files to publish: ${parsed.name}`,
       );
     }
-    const repositoryRootPath = `skills/project/${parsed.name}`;
     const asset = pseudoAsset({
       assetId: input.selection.assetId,
       kind,
@@ -242,6 +267,22 @@ async function creationPlan(input: {
     const localRoot = join(input.workspaceDirectory, PROJECT_DIR, "knowledge");
     const localPath = join(localRoot, `${name}.md`);
     await resolveInside(input.workspaceDirectory, localPath);
+    if (
+      isFileIgnored(
+        {
+          assetId: input.selection.assetId,
+          kind,
+          path: `knowledge/${name}.md`,
+        },
+        `${name}.md`,
+        input.rules,
+      )
+    ) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        `${name}.md is ignored by the shared ignore rules`,
+      );
+    }
     const asset = pseudoAsset({
       assetId: input.selection.assetId,
       kind,
@@ -280,14 +321,21 @@ async function creationPlan(input: {
   }
   const localRoot = join(input.workspaceDirectory, PROJECT_DIR, "docs", name);
   await resolveInside(input.workspaceDirectory, localRoot);
-  const scanned = await scanFiles(localRoot);
+  const repositoryRootPath = `docs/${name}`;
+  const scanned = await scanFiles(localRoot, {
+    isIgnored: (entry) =>
+      isFileIgnored(
+        { assetId: input.selection.assetId, kind, path: repositoryRootPath },
+        entry,
+        input.rules,
+      ),
+  });
   if (scanned.length === 0) {
     throw new PluginError(
       "E_VALIDATION_FAILED",
       `Document has no files to publish: ${name}`,
     );
   }
-  const repositoryRootPath = `docs/${name}`;
   const asset = pseudoAsset({
     assetId: input.selection.assetId,
     kind,
@@ -374,6 +422,7 @@ export async function previewBatchPublish(
           selection,
           workspaceDirectory: input.workspaceDirectory,
           checkout,
+          rules,
         });
         items.push(creationPreview(plan));
       } catch (error) {
@@ -557,6 +606,7 @@ export async function commitBatchPublish(
       { currentRevision: revision },
     );
   }
+  const rules = (await readSharedIgnoreRules(input.projectId)).rules;
   const preview = await previewBatchPublish(input);
   const publishable = preview.items.filter(
     (item) => item.state === "eligible" || item.state === "warning",
@@ -605,6 +655,7 @@ export async function commitBatchPublish(
           selection,
           workspaceDirectory: input.workspaceDirectory,
           checkout,
+          rules,
         });
         for (const file of plan.files) {
           const absolute = join(checkout, file.repositoryPath);

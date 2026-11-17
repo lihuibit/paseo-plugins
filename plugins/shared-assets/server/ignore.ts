@@ -7,6 +7,7 @@ import type {
 } from "../shared/core/types";
 import {
   formatIgnoreRules,
+  matchesFileIgnoreRules,
   matchesIgnoreRules,
   parseIgnoreRules,
   type IgnoreRule,
@@ -121,4 +122,30 @@ export function isRuleIgnored(
   rules: IgnoreRule[],
 ): boolean {
   return matchesIgnoreRules(asset, rules);
+}
+
+/**
+ * Whether one file inside an asset is hidden by the shared ignore rules.
+ *
+ * The file is matched both relative to its asset root (the anchor users see in
+ * the UI) and by its repository path, so existing rules such as `path:*.pyc`
+ * keep working without a migration.
+ */
+export function isFileIgnored(
+  asset: { assetId: string; kind: AssetKind; path: string },
+  relativePath: string,
+  rules: IgnoreRule[],
+): boolean {
+  const relative = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!relative) return false;
+  const assetPath = asset.path.replace(/\\/g, "/").replace(/^\/+/, "");
+  const candidates = [relative];
+  if (
+    assetPath &&
+    relative !== assetPath &&
+    !relative.startsWith(`${assetPath}/`)
+  ) {
+    candidates.push(`${assetPath}/${relative}`);
+  }
+  return matchesFileIgnoreRules(candidates, rules);
 }

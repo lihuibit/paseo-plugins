@@ -33,6 +33,123 @@ function globToRegExp(pattern: string): RegExp {
   return new RegExp(`${source}$`);
 }
 
+interface FileRule {
+  pattern: string;
+  directoryOnly: boolean;
+  anchored: boolean;
+  negated: boolean;
+}
+
+/**
+ * Parses one path rule with gitignore semantics. `**` has no equivalent in the
+ * file matcher, so such a rule is dropped rather than approximated.
+ */
+function parseFileRule(value: string): FileRule | null {
+  let body = value.trim();
+  const negated = body.startsWith("!");
+  if (negated) body = body.slice(1);
+  if (!body || body.includes("**")) return null;
+
+  const directoryOnly = body.endsWith("/");
+  if (directoryOnly) body = body.slice(0, -1);
+  const anchored = body.startsWith("/");
+  if (anchored) body = body.slice(1);
+  const pattern = body.replace(/^\.\//, "");
+  if (!pattern) return null;
+
+  return { pattern, directoryOnly, anchored, negated };
+}
+
+function matchesSegment(pattern: string, value: string): boolean {
+  if (!/[*?[]/.test(pattern)) return pattern === value;
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index] as string;
+    if (character === "*") {
+      source += "[^/]*";
+      continue;
+    }
+    if (character === "?") {
+      source += "[^/]";
+      continue;
+    }
+    if (character === "[") {
+      const close = pattern.indexOf("]", index + 1);
+      if (close > index + 1) {
+        source += pattern.slice(index, close + 1);
+        index = close;
+        continue;
+      }
+    }
+    source += character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`).test(value);
+}
+
+function fileRuleMatches(
+  rule: FileRule,
+  relativePath: string,
+  isDirectory: boolean,
+): boolean {
+  if (rule.directoryOnly && !isDirectory) return false;
+  const segments = relativePath.split("/").filter(Boolean);
+  if (segments.length === 0) return false;
+
+  if (rule.anchored) {
+    const depth = rule.pattern.split("/").length;
+    if (segments.length < depth) return false;
+    return matchesSegment(rule.pattern, segments.slice(0, depth).join("/"));
+  }
+
+  // Unanchored patterns match at any depth: `*.pyc` catches `a.pyc` and
+  // `scripts/lib/a.pyc` alike.
+  for (let start = segments.length - 1; start >= 0; start -= 1) {
+    if (matchesSegment(rule.pattern, segments.slice(start).join("/")))
+      return true;
+  }
+  return false;
+}
+
+/**
+ * Applies gitignore-style path rules to one or more relative paths.
+ *
+ * Rules are evaluated in file order and the last matching rule wins, which is
+ * what makes `!keep.pyc` able to re-include a file excluded by `*.pyc`.
+ */
+export function matchesFileIgnoreRules(
+  relativePaths: string | string[],
+  rules: IgnoreRule[],
+): boolean {
+  const candidates = (
+    Array.isArray(relativePaths) ? relativePaths : [relativePaths]
+  )
+    .map((path) => path.replace(/\\/g, "/").replace(/^\/+/, ""))
+    .filter(Boolean);
+  if (candidates.length === 0) return false;
+
+  let ignored = false;
+  for (const rule of rules) {
+    if (rule.type !== "path") continue;
+    const fileRule = parseFileRule(rule.value);
+    if (!fileRule) continue;
+    const matched = candidates.some((candidate) => {
+      const segments = candidate.split("/");
+      const directoryMatch = segments.some((_, index) =>
+        index < segments.length - 1
+          ? fileRuleMatches(
+              fileRule,
+              segments.slice(0, index + 1).join("/"),
+              true,
+            )
+          : false,
+      );
+      return directoryMatch || fileRuleMatches(fileRule, candidate, false);
+    });
+    if (matched) ignored = !fileRule.negated;
+  }
+  return ignored;
+}
+
 /**
  * Parses the shared `ignore-rules` file. Blank lines and `#` comments are
  * ignored; unknown prefixes are reported instead of silently dropped.
@@ -100,6 +217,7 @@ export function matchesIgnoreRules(
   return rules.some((rule) => {
     if (rule.type === "asset") return asset.assetId === rule.value;
     if (rule.type === "kind") return asset.kind === rule.value;
+    if (rule.value.startsWith("!")) return false;
     return matchesPath(rule.value, asset.path);
   });
 }

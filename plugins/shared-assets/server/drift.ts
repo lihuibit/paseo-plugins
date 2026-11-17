@@ -19,10 +19,12 @@ import { readBaselines, type ScopeBaselines } from "./baseline";
 import { fileExists, scanFiles, sha256 } from "./fs-utils";
 import {
   isDriftIgnored,
+  isFileIgnored,
   isRuleIgnored,
   readDriftIgnores,
   readSharedIgnoreRules,
 } from "./ignore";
+import type { IgnoreRule } from "../shared/core/ignore";
 import { readConfig } from "./registry";
 import { repoDir } from "./plugin-data";
 import { scanAllAssets } from "./repo";
@@ -65,10 +67,18 @@ async function fileDigest(path: string): Promise<string | null> {
   }
 }
 
-async function relativeFiles(root: string): Promise<string[]> {
+async function relativeFiles(
+  root: string,
+  asset: { assetId: string; kind: AssetKind; path: string },
+  rules: IgnoreRule[],
+): Promise<string[]> {
   if (!(await fileExists(root))) return [];
   try {
-    return (await scanFiles(root)).map((file) => file.path);
+    return (
+      await scanFiles(root, {
+        isIgnored: (entry) => isFileIgnored(asset, entry, rules),
+      })
+    ).map((file) => file.path);
   } catch {
     return [];
   }
@@ -150,12 +160,22 @@ async function promptItem(
   workspaceDirectory: string,
   checkout: string,
   baselines: ScopeBaselines,
+  rules: IgnoreRule[],
 ): Promise<Omit<DriftItem, "ignored"> | null> {
   const localPath = join(workspaceDirectory, PROJECT_DIR, "AGENTS.md");
   const hasBaseline = Object.values(baselines.entries).some(
     (entry) => entry.assetId === "prompt",
   );
   if (!hasBaseline && !(await fileExists(localPath))) return null;
+  if (
+    isFileIgnored(
+      { assetId: "prompt", kind: "prompt", path: "AGENTS.md" },
+      "AGENTS.md",
+      rules,
+    )
+  ) {
+    return null;
+  }
   const files = await buildFileStatuses(
     [
       {
@@ -191,6 +211,7 @@ async function knowledgeItems(
   workspaceDirectory: string,
   baselines: ScopeBaselines,
   assets: AssetSummary[],
+  rules: IgnoreRule[],
 ): Promise<Array<Omit<DriftItem, "ignored">>> {
   const names = new Set<string>();
   for (const asset of assets) {
@@ -217,6 +238,15 @@ async function knowledgeItems(
   const items: Array<Omit<DriftItem, "ignored">> = [];
   for (const name of [...names].sort()) {
     const assetId = `knowledge/${name}.md`;
+    if (
+      isFileIgnored(
+        { assetId, kind: "knowledge", path: assetId },
+        `${name}.md`,
+        rules,
+      )
+    ) {
+      continue;
+    }
     const files = await buildFileStatuses(
       [
         {
@@ -252,6 +282,7 @@ async function docItems(
   workspaceDirectory: string,
   baselines: ScopeBaselines,
   assets: AssetSummary[],
+  rules: IgnoreRule[],
 ): Promise<Array<Omit<DriftItem, "ignored">>> {
   const names = new Set<string>();
   for (const asset of assets) {
@@ -277,16 +308,25 @@ async function docItems(
   for (const name of [...names].sort()) {
     const remoteRoot = join(checkout, "docs", name);
     const localDocRoot = join(localRoot, name);
+    const assetPath = `docs/${name}`;
     const relatives = [
       ...new Set([
-        ...(await relativeFiles(remoteRoot)),
-        ...(await relativeFiles(localDocRoot)),
+        ...(await relativeFiles(
+          remoteRoot,
+          { assetId: `doc/${name}`, kind: "doc", path: assetPath },
+          rules,
+        )),
+        ...(await relativeFiles(
+          localDocRoot,
+          { assetId: `doc/${name}`, kind: "doc", path: assetPath },
+          rules,
+        )),
       ]),
     ].sort();
     const files = await buildFileStatuses(
       relatives.map((entry) => ({
         relativePath: entry,
-        repositoryPath: `docs/${name}/${entry}`,
+        repositoryPath: `${assetPath}/${entry}`,
         localPath: join(localDocRoot, entry),
         remotePath: join(remoteRoot, entry),
       })),
@@ -317,6 +357,7 @@ async function skillItems(
   checkout: string,
   baselines: ScopeBaselines,
   assets: AssetSummary[],
+  rules: IgnoreRule[],
 ): Promise<Array<Omit<DriftItem, "ignored">>> {
   const config = await readConfig();
   const records = (config.skills[projectId] ?? []).filter((record) =>
@@ -356,18 +397,24 @@ async function skillItems(
     const parsed = parseSkillAssetId(group.assetId);
     if (!parsed) continue;
     const asset = assetsById.get(group.assetId);
+    const assetPath = `skills/${parsed.scope}/${parsed.name}`;
     const repositoryRoot = join(checkout, "skills", parsed.scope, parsed.name);
     const localRoot = group.targetPath;
+    const assetRef = {
+      assetId: group.assetId,
+      kind: "skill" as const,
+      path: assetPath,
+    };
     const relatives = [
       ...new Set([
-        ...(await relativeFiles(repositoryRoot)),
-        ...(await relativeFiles(localRoot)),
+        ...(await relativeFiles(repositoryRoot, assetRef, rules)),
+        ...(await relativeFiles(localRoot, assetRef, rules)),
       ]),
     ].sort();
     const files = await buildFileStatuses(
       relatives.map((entry) => ({
         relativePath: entry,
-        repositoryPath: `skills/${parsed.scope}/${parsed.name}/${entry}`,
+        repositoryPath: `${assetPath}/${entry}`,
         localPath: join(localRoot, entry),
         remotePath: join(repositoryRoot, entry),
       })),
@@ -413,10 +460,10 @@ export async function listDrift(
 
   const partials = (
     await Promise.all([
-      promptItem(resolved, checkout, baselines),
-      knowledgeItems(checkout, resolved, baselines, assets),
-      docItems(checkout, resolved, baselines, assets),
-      skillItems(projectId, resolved, checkout, baselines, assets),
+      promptItem(resolved, checkout, baselines, rules),
+      knowledgeItems(checkout, resolved, baselines, assets, rules),
+      docItems(checkout, resolved, baselines, assets, rules),
+      skillItems(projectId, resolved, checkout, baselines, assets, rules),
     ])
   ).flat();
 

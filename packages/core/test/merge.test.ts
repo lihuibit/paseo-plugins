@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { hasConflictMarkers, merge3 } from "../src/merge";
 import {
   formatIgnoreRules,
+  matchesFileIgnoreRules,
   matchesIgnoreRules,
   parseIgnoreRules,
 } from "../src/ignore";
@@ -121,5 +122,33 @@ describe("ignore rules", () => {
   it("round-trips rule text", () => {
     const { rules } = parseIgnoreRules("kind:doc\npath:docs/x/**\n");
     expect(formatIgnoreRules(rules)).toBe("kind:doc\npath:docs/x/**\n");
+  });
+
+  it("matches gitignore-style file rules at any depth", () => {
+    const { rules } = parseIgnoreRules(
+      ["path:*.pyc", "__pycache__/", "dir/", "/anchored"].join("\n"),
+    );
+    expect(
+      matchesFileIgnoreRules("scripts/__pycache__/doppler.pyc", rules),
+    ).toBe(true);
+    expect(matchesFileIgnoreRules("scripts/doppler.pyc", rules)).toBe(true);
+    expect(matchesFileIgnoreRules("nested/dir/file.txt", rules)).toBe(true);
+    expect(matchesFileIgnoreRules("anchored/file.txt", rules)).toBe(true);
+    expect(matchesFileIgnoreRules("nested/anchored/file.txt", rules)).toBe(
+      false,
+    );
+  });
+
+  it("supports wildcards and last-match negation", () => {
+    const { rules } = parseIgnoreRules("*.py[cod]\n!keep.pyc\n");
+    expect(matchesFileIgnoreRules("a/b/drop.pyc", rules)).toBe(true);
+    expect(matchesFileIgnoreRules("a/b/drop.pyo", rules)).toBe(true);
+    expect(matchesFileIgnoreRules("a/b/keep.pyc", rules)).toBe(false);
+    expect(matchesFileIgnoreRules("a/b/keep.txt", rules)).toBe(false);
+  });
+
+  it("drops unsupported ** rules for file matching", () => {
+    const { rules } = parseIgnoreRules("docs/**\n");
+    expect(matchesFileIgnoreRules("docs/nested/file.md", rules)).toBe(false);
   });
 });
