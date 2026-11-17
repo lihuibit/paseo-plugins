@@ -35,7 +35,6 @@ import {
 } from "./ui/components";
 import type { Tokens } from "./ui/tokens";
 
-type AssignMode = "agent" | "pipeline";
 type AgentSource = "existing" | "create";
 type Timing = "immediate" | "manual" | "scheduled" | "recurring";
 
@@ -71,7 +70,6 @@ export function AssignTaskSheet({
   const candidates = useRpc(candidatesRpc);
   const assign = useRpc(assignRpc);
   const schedule = useRpc(scheduleRpc);
-  const [mode, setMode] = useState<AssignMode>("agent");
   const [projectId, setProjectId] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
   const [agentSource, setAgentSource] = useState<AgentSource>("existing");
@@ -95,7 +93,6 @@ export function AssignTaskSheet({
 
   useEffect(() => {
     if (!visible || !task) return;
-    setMode("agent");
     setTiming("immediate");
     setScheduledAt(defaultScheduledAt(new Date()));
     setRecurrence(defaultRecurrence());
@@ -234,10 +231,6 @@ export function AssignTaskSheet({
 
   const submit = async () => {
     if (!task) return;
-    if (mode === "pipeline") {
-      setError("本插件只支持独立 Agent 执行；流水线留给 I4。");
-      return;
-    }
     if (!project) {
       setError("请选择项目");
       return;
@@ -379,27 +372,6 @@ export function AssignTaskSheet({
       }
     >
       <View style={{ gap: tokens.spacing[3] }}>
-        <Field label="执行方式" tokens={tokens}>
-          <SegmentedControl
-            options={[
-              {
-                value: "agent",
-                label: "独立 Agent",
-                testID: "assign-mode-agent",
-              },
-              {
-                value: "pipeline",
-                label: "流水线",
-                testID: "assign-mode-pipeline",
-              },
-            ]}
-            value={mode}
-            onValueChange={(value) => setMode(value as AssignMode)}
-            tokens={tokens}
-            size={compact ? "md" : "sm"}
-          />
-        </Field>
-
         <SectionLabel label="目标" tokens={tokens} />
         <SelectField
           label="项目"
@@ -427,90 +399,84 @@ export function AssignTaskSheet({
         />
 
         <SectionLabel label="执行配置" tokens={tokens} />
-        {mode === "agent" ? (
-          <>
-            <Field label="Agent 来源" tokens={tokens}>
-              <SegmentedControl
-                options={[
-                  { value: "existing", label: "选择已有" },
-                  { value: "create", label: "新建 Agent" },
-                ]}
-                value={agentSource}
-                onValueChange={(value) => setAgentSource(value as AgentSource)}
-                tokens={tokens}
-                size={compact ? "md" : "sm"}
-              />
-            </Field>
-            {agentSource === "existing" ? (
-              <SelectField
-                label="Agent"
-                value={agentId || null}
-                options={agentOptions}
-                placeholder="选择 Agent"
-                onChange={setAgentId}
-                tokens={tokens}
-                disabled={agentOptions.length === 0}
-                hint={
-                  agentOptions.length === 0
-                    ? "该工作区还没有 Agent，请改用「新建 Agent」"
-                    : undefined
-                }
-                size={compact ? "md" : "sm"}
-                testID="assign-agent-trigger"
-              />
-            ) : (
-              <>
-                <SelectField
-                  label="使用 Profile"
-                  value={profileId || null}
-                  options={profileOptions}
-                  placeholder="从已配置的 Profile 选择"
-                  onChange={setProfileId}
-                  tokens={tokens}
-                  hint="Profile 在 Paseo 设置 → Agents 中管理"
-                  size={compact ? "md" : "sm"}
-                  testID="assign-profile-trigger"
-                />
-                {selectedProfile ? (
-                  <ProfileSummary profile={selectedProfile} tokens={tokens} />
-                ) : (
-                  <AgentConfigFields
-                    providers={data?.providers ?? []}
-                    values={{ provider, model, thinkingOptionId, modeId }}
-                    cwd={workspace?.directory ?? null}
-                    tokens={tokens}
-                    compact={compact}
-                    onChange={(next) => {
-                      setProvider(next.provider);
-                      setModel(next.model);
-                      setThinkingOptionId(next.thinkingOptionId);
-                      setModeId(next.modeId);
-                    }}
-                  />
-                )}
-              </>
-            )}
-            <Field
-              label="首条消息"
-              hint="留空则自动使用任务标题、描述与验收标准"
+        <>
+          <Field label="Agent 来源" tokens={tokens}>
+            <SegmentedControl
+              options={[
+                { value: "existing", label: "选择已有" },
+                { value: "create", label: "新建 Agent" },
+              ]}
+              value={agentSource}
+              onValueChange={(value) => setAgentSource(value as AgentSource)}
               tokens={tokens}
-            >
-              <FormInput
-                value={message}
-                onChangeText={setMessage}
-                placeholder="补充给 Agent 的说明"
+              size={compact ? "md" : "sm"}
+            />
+          </Field>
+          {agentSource === "existing" ? (
+            <SelectField
+              label="Agent"
+              value={agentId || null}
+              options={agentOptions}
+              placeholder="选择 Agent"
+              onChange={setAgentId}
+              tokens={tokens}
+              disabled={agentOptions.length === 0}
+              hint={
+                agentOptions.length === 0
+                  ? "该工作区还没有 Agent，请改用「新建 Agent」"
+                  : undefined
+              }
+              size={compact ? "md" : "sm"}
+              testID="assign-agent-trigger"
+            />
+          ) : (
+            <>
+              <SelectField
+                label="使用 Profile"
+                value={profileId || null}
+                options={profileOptions}
+                placeholder="从已配置的 Profile 选择"
+                onChange={setProfileId}
                 tokens={tokens}
-                multiline
-                minHeight={88}
-                testID="assign-task-message"
+                hint="Profile 在 Paseo 设置 → Agents 中管理"
+                size={compact ? "md" : "sm"}
+                testID="assign-profile-trigger"
               />
-            </Field>
-          </>
-        ) : (
-          <Hint tokens={tokens}>
-            本插件只支持独立 Agent 执行。流水线执行、模板与工作流留给 I4。
-          </Hint>
-        )}
+              {selectedProfile ? (
+                <ProfileSummary profile={selectedProfile} tokens={tokens} />
+              ) : (
+                <AgentConfigFields
+                  providers={data?.providers ?? []}
+                  values={{ provider, model, thinkingOptionId, modeId }}
+                  cwd={workspace?.directory ?? null}
+                  tokens={tokens}
+                  compact={compact}
+                  onChange={(next) => {
+                    setProvider(next.provider);
+                    setModel(next.model);
+                    setThinkingOptionId(next.thinkingOptionId);
+                    setModeId(next.modeId);
+                  }}
+                />
+              )}
+            </>
+          )}
+          <Field
+            label="首条消息"
+            hint="留空则自动使用任务标题、描述与验收标准"
+            tokens={tokens}
+          >
+            <FormInput
+              value={message}
+              onChangeText={setMessage}
+              placeholder="补充给 Agent 的说明"
+              tokens={tokens}
+              multiline
+              minHeight={88}
+              testID="assign-task-message"
+            />
+          </Field>
+        </>
 
         <SectionLabel label="执行时机" tokens={tokens} />
         <Field label="何时开始" tokens={tokens}>

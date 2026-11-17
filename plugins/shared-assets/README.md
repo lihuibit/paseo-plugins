@@ -56,4 +56,4 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
 
 Claude 只验证了目录约定，未做真实模型加载；Codex 目录已在 S4 验证。Provider 只要有
 已知的项目级 Skill 目录就会出现在 tabs 中，未验证项会明确标注。共享 `skills/global/`
-不再支持；Workflow 不迁移、不展示。
+不再支持；迁移时只导入受支持的资产类型。

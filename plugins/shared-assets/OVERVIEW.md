@@ -38,7 +38,6 @@ checkout and reports the push hint; it does not push automatically.
 - Network access is limited to the configured Git remote. No telemetry is sent.
 - Published commits remain local until someone pushes the repository; the plugin never forces a
   push. Merge conflicts must be resolved in the plugin or manually in the checkout.
-- Shared assets are project-scoped. Global skills are not supported, and workflows are not part of
-  the library.
+- Shared assets are project-scoped. Global skills are not supported.
 - Provider support covers directory conventions. Codex loading has been verified; Claude directory
   conventions are supported but real model loading has not been verified.

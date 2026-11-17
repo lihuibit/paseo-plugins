@@ -423,7 +423,7 @@ export function SharedAssetsScreen({
                 fontSize: tokens.fontSize.sm,
               }}
             >
-              Workflow、Skill、SYSTEM Prompt
+              Skill、SYSTEM Prompt
               与经验库以项目为作用域；同一项目下的工作区共用一套共享库。
             </Text>
           </View>
@@ -1718,7 +1718,7 @@ function ProjectDetail({
                       fontSize: tokens.fontSize.sm,
                     }}
                   >
-                    使用团队共享 Workflow、Skill、Provider SYSTEM Prompt
+                    使用团队共享 Skill、Provider SYSTEM Prompt
                     与经验库，也可选择本地资产发布给团队
                   </Text>
                 )}

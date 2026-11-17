@@ -43,4 +43,4 @@ an API key of its own.
 - The plugin is a trusted, unsandboxed host plugin. It can start, stop and message agents through
   Paseo, and can read and write its plugin data directory and the assigned workspace.
 - Agent execution, model access and permission prompts are handled by Paseo and the selected
-  provider. There is no Pipeline support.
+  provider.

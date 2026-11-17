@@ -36,4 +36,4 @@ Agent，也可以新建 Agent 执行，并支持父子任务表达多步骤工�
   调度只在 daemon 运行期间推进。
 - 插件是受信任、无沙箱的宿主插件，可以通过 Paseo 启动、停止和向 Agent 发消息，并可读写插件
   数据目录及被分配的工作区。
-- Agent 执行、模型访问和权限确认由 Paseo 与所选 Provider 负责。插件不支持 Pipeline。
+- Agent 执行、模型访问和权限确认由 Paseo 与所选 Provider 负责。

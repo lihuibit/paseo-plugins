@@ -47,14 +47,13 @@ import {
 } from "./ui/components";
 import { createTokens, type Tokens } from "./ui/tokens";
 
-type ExecutionFilter = "all" | "unassigned" | "agent" | "pipeline";
+type ExecutionFilter = "all" | "unassigned" | "agent";
 type ViewMode = "board" | "list";
 
 const EXECUTION_FILTERS: Array<{ value: ExecutionFilter; label: string }> = [
   { value: "all", label: "全部" },
   { value: "unassigned", label: "未分配" },
   { value: "agent", label: "Agent" },
-  { value: "pipeline", label: "流水线" },
 ];
 
 const VIEW_MODES: Array<{ value: ViewMode; label: string; icon: string }> = [
@@ -62,7 +61,7 @@ const VIEW_MODES: Array<{ value: ViewMode; label: string; icon: string }> = [
   { value: "list", label: "列表", icon: "List" },
 ];
 
-function executionKind(task: BoardTask): "agent" | "pipeline" | "unassigned" {
+function executionKind(task: BoardTask): "agent" | "unassigned" {
   return task.execution?.kind ?? task.assignment?.mode ?? "unassigned";
 }
 
@@ -376,8 +375,7 @@ function TaskBoardContent({
                     fontSize: tokens.fontSize.sm,
                   }}
                 >
-                  跨工作区的任务；分配后由独立 Agent
-                  或流水线执行，跑完进入待验收。
+                  跨工作区的任务；分配后由独立 Agent 执行，跑完进入待验收。
                 </Text>
               </View>
               <View

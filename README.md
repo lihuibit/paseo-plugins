@@ -197,7 +197,7 @@ $PASEO_HOME/plugin-data/paseo-shared-assets/
 └── logs/rpc.log                      # RPC 业务错误
 ```
 
-插件只运行在 Paseo 插件宿主内，不依赖其他 daemon、CLI 或流水线运行时代码。
+插件只运行在 Paseo 插件宿主内，不依赖其他 daemon 或 CLI 运行时代码。
 
 ## 投影
 
@@ -261,7 +261,7 @@ drift 按文件比较上次基线、项目 `.paseo/` 或 Provider 投影副本�
 ### 项目资产导入
 
 `shared-assets.migrate` 默认 dry-run：从项目 `.paseo/` 导入 `AGENTS.md`、
-`knowledge/*.md`、`docs/<name>/**`；跳过 `workflows/`；Provider 项目级 Skill 只列为
+`knowledge/*.md`、`docs/<name>/**`；跳过不支持的历史目录类型；Provider 项目级 Skill 只列为
 “可发布候选”。目标内容不同记为冲突、不覆盖；源目录只读，执行后源文件仍在。报告包含每个文件的
 `import/skip/conflict`、冲突 diff、迁移前后文件数/字节数与 digest；`sourceDigest`
 未变化时直接复用上次记录。
