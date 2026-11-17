@@ -10,6 +10,7 @@ import {
 } from "./baseline";
 import { atomicWriteFile, fileExists, scanFiles, sha256 } from "./fs-utils";
 import { repoDir } from "./plugin-data";
+import { readConfig, writeConfig } from "./registry";
 import { scanAllAssets } from "./repo";
 
 export interface MaterializeResult {
@@ -107,6 +108,34 @@ function setEntry(
 }
 
 /**
+ * Binding materializes the shared prompt even without an explicit association.
+ * Record that projection so the relationship list and unlink agree on it.
+ */
+async function recordPromptAssociation(
+  projectId: string,
+  workspaceDirectory: string,
+  baselines: ScopeBaselines,
+): Promise<void> {
+  const prompt = Object.values(baselines.entries).find(
+    (entry) => entry.assetId === "prompt",
+  );
+  if (!prompt) return;
+  const config = await readConfig();
+  const stored = config.instructions[projectId];
+  if (stored?.canonical) return;
+  config.instructions[projectId] = {
+    canonical: {
+      targetPath: join(workspaceDirectory, PROJECT_DIR, "AGENTS.md"),
+      baselineDigest: prompt.digest,
+      updatedAt: new Date().toISOString(),
+      source: "materialize",
+    },
+    providers: stored?.providers ?? [],
+  };
+  await writeConfig(config);
+}
+
+/**
  * Copies shared knowledge, docs and the canonical prompt into the workspace.
  * Local edits are never overwritten; only files whose content still matches the
  * recorded baseline are advanced to the shared revision.
@@ -164,6 +193,7 @@ export async function materializeWorkspace(
   }
 
   await writeBaselines(workspaceDirectory, baselines);
+  await recordPromptAssociation(projectId, workspaceDirectory, baselines);
   return result;
 }
 

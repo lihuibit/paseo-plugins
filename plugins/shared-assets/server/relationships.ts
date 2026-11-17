@@ -36,6 +36,7 @@ import {
   scanFiles,
 } from "./fs-utils";
 import {
+  isOwnedCanonicalFile,
   removeInstructionProjections,
   adoptInstructions,
 } from "./instructions";
@@ -776,26 +777,40 @@ export async function unlinkRelationship(input: {
     }
   } else if (input.kind === "prompt") {
     const stored = config.instructions[input.projectId];
-    if (!stored) {
+    const baselines = await readBaselines(input.workspaceDirectory);
+    const promptBaselines = Object.values(baselines.entries).filter(
+      (entry) => entry.assetId === "prompt",
+    );
+    if (!stored && promptBaselines.length === 0) {
       throw new PluginError(
         "E_NOT_CONFIGURED",
         "Shared instructions are not associated with the project",
       );
     }
-    const canonicalPath = stored.canonical?.targetPath ?? null;
-    const result = await removeInstructionProjections(
-      input.projectId,
-      input.workspaceDirectory,
-    );
-    delete config.instructions[input.projectId];
-    deleted.push(...result.removed);
-    kept.push(...result.preserved);
-    if (canonicalPath) {
-      if (input.deleteLocal) {
-        if (await fileExists(canonicalPath)) {
-          await removeLocalPath(input.workspaceDirectory, canonicalPath);
-          deleted.push(canonicalPath);
-        }
+    const canonicalPath =
+      stored?.canonical?.targetPath ??
+      join(input.workspaceDirectory, PROJECT_DIR, "AGENTS.md");
+    const canonical = await isOwnedCanonicalFile({
+      projectId: input.projectId,
+      canonicalPath,
+      baselineDigest:
+        stored?.canonical?.baselineDigest ?? promptBaselines[0]?.digest ?? null,
+    });
+    hadLocalChanges = canonical.exists && !canonical.owned;
+    if (stored) {
+      const result = await removeInstructionProjections(
+        input.projectId,
+        input.workspaceDirectory,
+        { removeOwned: input.deleteLocal },
+      );
+      deleted.push(...result.removed);
+      kept.push(...result.preserved);
+      delete config.instructions[input.projectId];
+    }
+    if (canonical.exists) {
+      if (input.deleteLocal && canonical.owned) {
+        await removeLocalPath(input.workspaceDirectory, canonicalPath);
+        deleted.push(canonicalPath);
       } else {
         kept.push(canonicalPath);
       }

@@ -1,4 +1,12 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,8 +16,11 @@ import {
   listRelationships,
   unlinkRelationship,
 } from "../server/relationships";
+import { readBaselines, recordBaselineFromFile } from "../server/baseline";
+import { materializeWorkspace } from "../server/materialize";
 import { repoDir } from "../server/plugin-data";
-import { saveBinding } from "../server/registry";
+import { readConfig, saveBinding } from "../server/registry";
+import { batchAssociateRows } from "../client/batch-associate";
 
 const SKILL = `---
 name: review
@@ -270,5 +281,234 @@ describe("association lifecycle", () => {
       "# Local instructions\n",
     );
     expect(existsSync(join(workspace, "AGENTS.md"))).toBe(true);
+  });
+});
+
+describe("prompt unlink", () => {
+  async function writePromptBaseline(content: string): Promise<string> {
+    const canonical = join(workspace, ".paseo", "AGENTS.md");
+    await mkdir(join(workspace, ".paseo"), { recursive: true });
+    await writeFile(canonical, content);
+    await recordBaselineFromFile({
+      workspaceDirectory: workspace,
+      assetId: "prompt",
+      kind: "prompt",
+      provider: null,
+      relativePath: "AGENTS.md",
+      sourcePath: canonical,
+    });
+    return canonical;
+  }
+
+  it("unlinks a prompt from a baseline even when no instructions record exists", async () => {
+    const canonical = await writePromptBaseline("# Shared instructions\n");
+    expect((await readConfig()).instructions.p1).toBeUndefined();
+
+    const result = await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: null,
+      assetId: "prompt",
+      deleteLocal: false,
+    });
+
+    expect(result.kept).toContain(canonical);
+    expect(existsSync(canonical)).toBe(true);
+    expect(
+      Object.values((await readBaselines(workspace)).entries).filter(
+        (entry) => entry.assetId === "prompt",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("cleans a stale baseline and keeps the user-modified projection", async () => {
+    const canonical = await writePromptBaseline("# Shared instructions\n");
+    await writeFile(canonical, "# Local edit after sync\n");
+
+    const result = await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: null,
+      assetId: "prompt",
+      deleteLocal: true,
+    });
+
+    expect(result.hadLocalChanges).toBe(true);
+    expect(result.deleted).toEqual([]);
+    expect(existsSync(canonical)).toBe(true);
+    expect(
+      Object.values((await readBaselines(workspace)).entries).filter(
+        (entry) => entry.assetId === "prompt",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("deletes an unchanged baseline projection only with deleteLocal", async () => {
+    const canonical = await writePromptBaseline("# Shared instructions\n");
+    const result = await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: null,
+      assetId: "prompt",
+      deleteLocal: true,
+    });
+
+    expect(result.deleted).toContain(canonical);
+    expect(existsSync(canonical)).toBe(false);
+  });
+
+  it("keeps the existing linked prompt unlink behavior", async () => {
+    await mkdir(join(workspace, ".paseo"), { recursive: true });
+    await writeFile(
+      join(workspace, ".paseo", "AGENTS.md"),
+      "# Local instructions\n",
+    );
+    await adoptRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: "codex",
+      assetId: "prompt",
+      localAssetId: "local:prompt",
+      mode: "preserve-local",
+    });
+    expect((await readConfig()).instructions.p1?.canonical).not.toBeNull();
+
+    const result = await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: "codex",
+      assetId: "prompt",
+      deleteLocal: false,
+    });
+
+    expect(result.kept).toContain(join(workspace, ".paseo", "AGENTS.md"));
+    expect(existsSync(join(workspace, ".paseo", "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(workspace, "AGENTS.md"))).toBe(true);
+    expect((await readConfig()).instructions.p1).toBeUndefined();
+  });
+
+  it("records auto-materialized prompts so listing agrees with unlink", async () => {
+    await materializeWorkspace("p1", workspace);
+    const canonical = join(workspace, ".paseo", "AGENTS.md");
+    expect(existsSync(canonical)).toBe(true);
+    expect((await readConfig()).instructions.p1?.canonical?.source).toBe(
+      "materialize",
+    );
+
+    const listed = await listRelationships({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: "codex",
+    });
+    expect(listed.rows[0]?.relationship).toBe("linked");
+
+    const result = await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: "codex",
+      assetId: "prompt",
+      deleteLocal: false,
+    });
+    expect(result.kept).toContain(canonical);
+    expect((await readConfig()).instructions.p1).toBeUndefined();
+  });
+
+  it("preserves a user-created root AGENTS.md symlink on unlink", async () => {
+    await materializeWorkspace("p1", workspace);
+    const canonical = join(workspace, ".paseo", "AGENTS.md");
+    const rootLink = join(workspace, "AGENTS.md");
+    await symlink(join(".paseo", "AGENTS.md"), rootLink);
+
+    await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: "codex",
+      assetId: "prompt",
+      deleteLocal: false,
+    });
+
+    expect(existsSync(rootLink)).toBe(true);
+    expect(existsSync(canonical)).toBe(true);
+  });
+
+  it("never deletes a user-created root symlink, even with deleteLocal", async () => {
+    await materializeWorkspace("p1", workspace);
+    const canonical = join(workspace, ".paseo", "AGENTS.md");
+    const rootLink = join(workspace, "AGENTS.md");
+    await symlink(join(".paseo", "AGENTS.md"), rootLink);
+
+    await unlinkRelationship({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "prompt",
+      provider: "codex",
+      assetId: "prompt",
+      deleteLocal: true,
+    });
+
+    const link = await lstat(rootLink);
+    expect(link.isSymbolicLink()).toBe(true);
+    expect(existsSync(canonical)).toBe(false);
+  });
+});
+
+describe("batch association", () => {
+  it("associates every candidate serially and reports successes", async () => {
+    for (const name of ["alpha", "beta"]) {
+      const shared = join(repoDir("p1"), "skills", "project", name);
+      await mkdir(shared, { recursive: true });
+      await writeFile(
+        join(shared, "SKILL.md"),
+        SKILL.replace("name: review", `name: ${name}`),
+      );
+      const local = join(workspace, ".codex", "skills", name);
+      await mkdir(local, { recursive: true });
+      await writeFile(
+        join(local, "SKILL.md"),
+        SKILL.replace("name: review", `name: ${name}`),
+      );
+    }
+    await mkdir(join(workspace, ".codex", "skills", "review"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(workspace, ".codex", "skills", "review", "SKILL.md"),
+      SKILL,
+    );
+
+    const listed = await listRelationships({
+      projectId: "p1",
+      workspaceDirectory: workspace,
+      kind: "skill",
+      provider: "codex",
+    });
+    const candidates = listed.rows.filter(
+      (row) => row.relationship === "candidate",
+    );
+    expect(candidates).toHaveLength(3);
+
+    const result = await batchAssociateRows(candidates, async (row) => {
+      await adoptRelationship({
+        projectId: "p1",
+        workspaceDirectory: workspace,
+        kind: "skill",
+        provider: "codex",
+        assetId: row.shared!.assetId,
+        localAssetId: row.local!.assetId,
+        mode: "preserve-local",
+      });
+    });
+
+    expect(result.succeeded).toBe(3);
+    expect(result.failed).toEqual([]);
+    expect((await readConfig()).skills.p1).toHaveLength(3);
   });
 });

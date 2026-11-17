@@ -53,7 +53,7 @@ async function fileDigest(path: string): Promise<string | null> {
   }
 }
 
-async function isOwnedEntry(
+export async function isOwnedEntry(
   targetPath: string,
   canonicalPath: string,
   record: InstructionProjection | undefined,
@@ -86,6 +86,29 @@ async function isOwnedEntry(
   if (record?.kind === "copy" && record.baselineDigest === digest)
     return { owned: true };
   return { owned: false, reason: "existing user file differs" };
+}
+
+/**
+ * Ownership check for the canonical `.paseo/AGENTS.md` projection. The plugin
+ * never creates it as a symlink, so a symlink is always user-owned.
+ */
+export async function isOwnedCanonicalFile(input: {
+  projectId: string;
+  canonicalPath: string;
+  baselineDigest: string | null;
+}): Promise<{ owned: boolean; exists: boolean }> {
+  const info = await lstat(input.canonicalPath).catch(() => null);
+  if (!info) return { owned: false, exists: false };
+  if (info.isSymbolicLink() || !info.isFile()) {
+    return { owned: false, exists: true };
+  }
+  const digest = await fileDigest(input.canonicalPath);
+  if (digest === null) return { owned: false, exists: true };
+  if (input.baselineDigest !== null && digest === input.baselineDigest) {
+    return { owned: true, exists: true };
+  }
+  const shared = await readShared(repoDir(input.projectId));
+  return { owned: shared !== null && digest === shared.digest, exists: true };
 }
 
 /**
@@ -517,17 +540,23 @@ export async function adoptInstructions(input: {
 export async function removeInstructionProjections(
   projectId: string,
   workspaceDirectory: string,
+  options: { removeOwned?: boolean } = {},
 ): Promise<{ removed: string[]; preserved: string[] }> {
   await migrateLegacyInstructionPaths(projectId, workspaceDirectory);
   const config = await readConfig();
   const stored = config.instructions[projectId];
   if (!stored) return { removed: [], preserved: [] };
+  const removeOwned = options.removeOwned ?? true;
   const canonicalPath = join(workspaceDirectory, PROJECT_DIR, "AGENTS.md");
   const removed: string[] = [];
   const preserved: string[] = [];
   for (const record of stored.providers) {
     if (!(await fileExists(record.targetPath))) {
-      removed.push(record.targetPath);
+      if (removeOwned) removed.push(record.targetPath);
+      continue;
+    }
+    if (!removeOwned) {
+      preserved.push(record.targetPath);
       continue;
     }
     const ownership = await isOwnedEntry(

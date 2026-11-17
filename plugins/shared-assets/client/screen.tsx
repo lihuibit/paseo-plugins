@@ -74,6 +74,10 @@ import {
   TextField,
 } from "./ui/components";
 import { countDrift } from "./drift-counts";
+import {
+  batchAssociateRows,
+  type BatchAssociateFailure,
+} from "./batch-associate";
 import { createTokens, type Tokens } from "./ui/tokens";
 
 type Tab = "skills" | "prompt" | "knowledge" | "docs";
@@ -969,6 +973,7 @@ function ProjectDetail({
     title: string;
     succeeded: number;
     failed: number;
+    failures?: BatchAssociateFailure[];
   } | null>(null);
 
   const workspaceId = project.workspaceId;
@@ -1279,6 +1284,32 @@ function ProjectDetail({
           ? `${row.shared!.name} 已关联，保留本地版本`
           : `${row.shared!.name} 已关联并使用共享版本`,
       );
+    });
+  };
+
+  const associateRows = async (rows: AssetRelationshipRow[], title: string) => {
+    if (!workspaceId) return;
+    const outcome = await batchAssociateRows(rows, async (row) => {
+      if (!row.shared || !row.local) {
+        throw new Error("资产缺少共享或本地来源");
+      }
+      unwrap(
+        await relationshipsAdoptCall({
+          projectId: project.projectId,
+          workspaceId,
+          kind: row.shared.kind,
+          provider: row.local.provider,
+          assetId: row.shared.assetId,
+          localAssetId: row.local.assetId,
+          mode: "preserve-local",
+        }),
+      );
+    });
+    setBatchOutcome({
+      title,
+      succeeded: outcome.succeeded,
+      failed: outcome.failed.length,
+      failures: outcome.failed,
     });
   };
 
@@ -2093,6 +2124,11 @@ function ProjectDetail({
                 void run("enable", () => setEnabled(row, true))
               }
               onAssociate={(row) => setAssociation(row)}
+              onAssociateAll={(rows) =>
+                run("batch-associate", () =>
+                  associateRows(rows, "一键关联全部"),
+                )
+              }
               onUnlink={(row) => setUnlink(row)}
               onDiff={(row) => void openDiff(row)}
               onMerge={(row) => void openMerge(row)}
@@ -2201,30 +2237,9 @@ function ProjectDetail({
             })
           }
           onBatchAssociate={() =>
-            run("batch-associate", async () => {
-              let done = 0;
-              let failed = 0;
-              for (const row of batchCandidates) {
-                if (!workspaceId || !row.shared || !row.local) continue;
-                try {
-                  unwrap(
-                    await relationshipsAdoptCall({
-                      projectId: project.projectId,
-                      workspaceId,
-                      kind: row.shared.kind,
-                      provider: row.local.provider,
-                      assetId: row.shared.assetId,
-                      localAssetId: row.local.assetId,
-                      mode: "preserve-local",
-                    }),
-                  );
-                  done += 1;
-                } catch {
-                  failed += 1;
-                }
-              }
-              setBatchOutcome({ title: "批量关联", succeeded: done, failed });
-            })
+            run("batch-associate", () =>
+              associateRows(batchCandidates, "批量关联"),
+            )
           }
           onBatchSync={() =>
             run("batch-sync", async () => {
@@ -2825,6 +2840,7 @@ function RelationshipView({
   onSelectForPublish,
   onEnable,
   onAssociate,
+  onAssociateAll,
   onUnlink,
   onDiff,
   onMerge,
@@ -2841,13 +2857,19 @@ function RelationshipView({
   selectedIds: ReadonlySet<string>;
   batchMode: boolean;
   batchSelected: ReadonlySet<string>;
-  batchOutcome: { title: string; succeeded: number; failed: number } | null;
+  batchOutcome: {
+    title: string;
+    succeeded: number;
+    failed: number;
+    failures?: BatchAssociateFailure[];
+  } | null;
   onDismissBatchOutcome: () => void;
   onToggleBatch: (row: AssetRelationshipRow) => void;
   onToggleSelected: (row: AssetRelationshipRow) => void;
   onSelectForPublish: (row: AssetRelationshipRow) => void;
   onEnable: (row: AssetRelationshipRow) => void;
   onAssociate: (row: AssetRelationshipRow) => void;
+  onAssociateAll: (rows: AssetRelationshipRow[]) => void;
   onUnlink: (row: AssetRelationshipRow) => void;
   onDiff: (row: AssetRelationshipRow) => void;
   onMerge: (row: AssetRelationshipRow) => void;
@@ -2901,7 +2923,8 @@ function RelationshipView({
             icon="Link2"
             variant="secondary"
             style={compact ? { alignSelf: "flex-start" } : undefined}
-            onPress={() => candidates.forEach((row) => onAssociate(row))}
+            disabled={busy !== null}
+            onPress={() => onAssociateAll(candidates)}
           >
             一键关联全部
           </Button>
@@ -2946,6 +2969,21 @@ function RelationshipView({
               }}
             >
               失败 {batchOutcome.failed} 项
+            </Text>
+          ) : null}
+          {batchOutcome.failures && batchOutcome.failures.length > 0 ? (
+            <Text
+              style={{
+                flexShrink: 1,
+                color: tokens.colors.foregroundMuted,
+                fontSize: tokens.fontSize.sm,
+              }}
+              numberOfLines={2}
+            >
+              {batchOutcome.failures
+                .slice(0, 3)
+                .map((entry) => `${entry.name}: ${entry.message}`)
+                .join("；")}
             </Text>
           ) : null}
           <Pressable

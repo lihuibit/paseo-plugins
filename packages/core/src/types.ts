@@ -55,6 +55,8 @@ export interface CanonicalInstruction {
   targetPath: string;
   baselineDigest: string;
   updatedAt: string;
+  /** How the association was created; absent means a manual action. */
+  source?: "manual" | "materialize";
 }
 
 export interface PluginConfig {
