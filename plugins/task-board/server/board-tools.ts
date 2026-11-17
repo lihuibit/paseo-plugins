@@ -111,7 +111,8 @@ export function createBoardDeclareTool(
   return tool(
     "board_declare",
     "Report this task's status to the Paseo task board. Call once per turn when you finish, " +
-      "need a human, are waiting on your own background work, or want to post progress.",
+      "need a human, are waiting on your own background work, or want to post progress. " +
+      "Use progress for stage transitions and long-running steps; one per stage, with a concrete summary.",
     z
       .object({
         kind: z.enum(["review", "blocked", "waiting", "progress", "clear"]),

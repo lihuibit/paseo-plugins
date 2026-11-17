@@ -49,7 +49,9 @@ board_declare{kind:"review"}。只有用户明确确认整个任务完成后，�
 board_done 并传入 {{taskId}}。不要提前 done，也不要用 done 代替 review。
 
 ## 汇报约定
-- 长任务用 board_declare{kind:"progress"} 报进度；
+- 启动子任务后、以及子任务每进入一个新阶段（实现→测试→修复）时，
+  用 board_declare{kind:"progress", stage:"…", summary:"…"} 报一行；
+  同一阶段不重复报；progress 不改变卡片状态，也不能代替结尾的 review/blocked/waiting。
 - 等待后台工作用 waiting；
 - 需要用户决策或授权用 blocked + humanRequest；
 - 本轮结束、等待用户验收用 review。`;

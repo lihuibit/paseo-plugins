@@ -279,6 +279,13 @@ function toolByName(paseo: PaseoApi, service: TaskBoardService, name: string) {
 }
 
 describe("board tools", () => {
+  it("documents the progress contract on board_declare", () => {
+    const declare = createBoardDeclareTool({} as TaskBoardService);
+    expect(declare.description).toContain(
+      "Use progress for stage transitions and long-running steps; one per stage, with a concrete summary.",
+    );
+  });
+
   it("injects the full management surface for admins and only declare for workers", () => {
     const service = {} as TaskBoardService;
     const declare = createBoardDeclareTool(service);

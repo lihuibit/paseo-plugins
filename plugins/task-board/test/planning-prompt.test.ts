@@ -44,6 +44,23 @@ describe("planning prompt", () => {
     );
   });
 
+  it("documents the progress contract for worker tasks", () => {
+    const worker = buildBoardSystemPrompt(workerTask);
+    expect(worker).toContain("Progress reporting");
+    expect(worker).toContain("At most one progress per stage");
+    expect(worker).toContain(
+      "never replaces the closing review/blocked/waiting",
+    );
+  });
+
+  it("documents the progress contract for planning tasks", () => {
+    expect(BUILTIN_PLANNING_PROMPT).toContain("子任务每进入一个新阶段");
+    expect(BUILTIN_PLANNING_PROMPT).toContain("同一阶段不重复报");
+    expect(BUILTIN_PLANNING_PROMPT).toContain(
+      "不能代替结尾的 review/blocked/waiting",
+    );
+  });
+
   it("prepends the built-in prompt only for planning tasks", () => {
     const planning = buildBoardSystemPrompt(planningTask);
     expect(
