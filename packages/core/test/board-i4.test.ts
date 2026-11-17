@@ -23,7 +23,6 @@ import {
   nextCronRunAt,
   nextRunAtForTrigger,
 } from "../src/board/schedule";
-import { mapLegacyDocument } from "../src/board/migrate";
 import { preferredTaskForAgent } from "../src/board/agent-index";
 import type {
   BoardAssignment,
@@ -358,79 +357,5 @@ describe("hierarchy, cancel and unassign", () => {
     expect(unassigned.task.execution).toBeNull();
     expect(unassigned.task.assignment).toBeUndefined();
     expect(unassigned.task.trigger).toBeUndefined();
-  });
-});
-
-describe("legacy migration mapping", () => {
-  it("remaps ids, keeps triggers, remaps hierarchy and drops missing agents", () => {
-    const legacy = {
-      version: 1,
-      nextNumber: 9,
-      tasks: [
-        {
-          id: "btask_dup",
-          displayId: "TASK-1",
-          title: "Legacy parent",
-          status: "todo",
-          trigger: {
-            kind: "recurring",
-            cadence: { type: "every", everyMs: 60000 },
-          },
-          nextRunAt: "2026-11-13T10:10:00.000Z",
-          revision: 3,
-          createdAt: T0,
-          updatedAt: T0,
-          activity: [{ at: T0, kind: "created" }],
-        },
-        {
-          id: "btask_child",
-          displayId: "TASK-2",
-          title: "Legacy child",
-          status: "blocked",
-          hierarchyParentId: "btask_dup",
-          execution: {
-            kind: "agent",
-            agentId: "agent_gone",
-            project: { projectId: "prj", projectName: "p", projectRoot: "/p" },
-            workspace: {
-              workspaceId: "wks",
-              workspaceName: "w",
-              workspaceDirectory: "/w",
-              created: false,
-            },
-            provider: "codex",
-            startedAt: T0,
-          },
-          revision: 1,
-          createdAt: T0,
-          updatedAt: T0,
-          activity: [],
-        },
-        { id: "btask_bad", title: "No status", status: "mystery" },
-      ],
-    };
-    let sequence = 0;
-    const result = mapLegacyDocument(legacy, {
-      now: T2,
-      includeFinished: true,
-      existingTaskIds: new Set(["btask_dup"]),
-      existingDisplayIds: new Set(["TASK-1"]),
-      nextNumber: 3,
-      createId: () => `btask_new${++sequence}`,
-      agentExists: () => false,
-    });
-    expect(result.tasks).toHaveLength(3);
-    const parent = result.tasks[0];
-    const child = result.tasks[1];
-    expect(parent?.id).toMatch(/^btask_new/);
-    expect(parent?.displayId).not.toBe("TASK-1");
-    expect(parent?.trigger?.kind).toBe("recurring");
-    expect(parent?.nextRunAt).toBe("2026-11-13T10:10:00.000Z");
-    expect(child?.hierarchyParentId).toBe(parent?.id);
-    expect(child?.execution).toBeNull();
-    expect(child?.status).toBe("blocked");
-    expect(result.tasks[2]?.status).toBe("planning");
-    expect(result.report.conflicts.length).toBeGreaterThan(0);
-    expect(result.nextNumber).toBeGreaterThan(3);
   });
 });

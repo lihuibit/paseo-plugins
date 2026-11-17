@@ -734,58 +734,6 @@ export const notificationsTestRpc = defineRpc({
   ),
 });
 
-export const MigrateLegacyInputSchema = z
-  .object({
-    dryRun: z.boolean().default(true),
-    sourcePath: z.string().trim().min(1).optional(),
-    includeFinished: z.boolean().default(true),
-  })
-  .strict();
-
-export const MigrateLegacyReportSchema = z
-  .object({
-    dryRun: z.boolean(),
-    noop: z.boolean(),
-    sourcePath: z.string().min(1),
-    sourceDigest: z.string().min(1),
-    appliedAt: z.string().min(1),
-    mapped: z.array(
-      z
-        .object({
-          legacyId: z.string().min(1),
-          taskId: z.string().min(1),
-          displayId: z.string().min(1),
-          status: BoardStatusSchema,
-        })
-        .strict(),
-    ),
-    skipped: z.array(
-      z
-        .object({
-          legacyId: z.string().min(1),
-          reason: z.string().min(1),
-        })
-        .strict(),
-    ),
-    conflicts: z.array(
-      z
-        .object({
-          legacyId: z.string().min(1),
-          kind: z.string().min(1),
-          message: z.string().min(1),
-        })
-        .strict(),
-    ),
-    nextNumber: z.number().int().positive().optional(),
-  })
-  .strict();
-
-export const migrateLegacyRpc = defineRpc({
-  name: "task-board.migrate-legacy",
-  input: MigrateLegacyInputSchema,
-  output: envelope(MigrateLegacyReportSchema),
-});
-
 export const healthRpc = defineRpc({
   name: "task-board.health",
   input: emptyInput,

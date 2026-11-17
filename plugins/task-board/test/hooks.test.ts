@@ -40,13 +40,13 @@ function register() {
 const context = { paseo: {} };
 
 describe("board hooks", () => {
-  it("injects board_declare for legacy board labels", async () => {
+  it("injects board_declare for board labels", async () => {
     const { hooks, service } = register();
     const result = (await hooks.get("agent.open.before")!(
       {
         request: {
-          agentId: "agent_legacy",
-          labels: { "agentstorm.board": "1", "agentstorm.task-id": "btask_1" },
+          agentId: "agent_worker",
+          labels: { "paseo.board": "1", "paseo.task-id": "btask_1" },
           tools: [],
           purpose: "message",
         },
@@ -55,21 +55,21 @@ describe("board hooks", () => {
     )) as { tools: AgentToolDefinition[] };
 
     expect(result.tools.map((tool) => tool.name)).toEqual(["board_declare"]);
-    expect(service.bindAgentFromOpen).toHaveBeenCalledWith("agent_legacy", {
-      "agentstorm.board": "1",
-      "agentstorm.task-id": "btask_1",
+    expect(service.bindAgentFromOpen).toHaveBeenCalledWith("agent_worker", {
+      "paseo.board": "1",
+      "paseo.task-id": "btask_1",
     });
   });
 
-  it("injects admin tools for legacy admin labels", async () => {
+  it("injects admin tools for admin labels", async () => {
     const { hooks } = register();
     const result = (await hooks.get("agent.open.before")!(
       {
         request: {
           agentId: "agent_admin",
           labels: {
-            "agentstorm.board": "1",
-            "agentstorm.board-admin": "1",
+            "paseo.board": "1",
+            "paseo.board-admin": "1",
           },
           tools: [],
           purpose: "message",
@@ -84,18 +84,18 @@ describe("board hooks", () => {
     ]);
   });
 
-  it("binds an agent from legacy metadata", async () => {
+  it("binds an agent from metadata", async () => {
     const { hooks, service } = register();
     await hooks.get("agent.create.after")!(
       {
         agent: {
-          id: "agent_legacy",
-          metadata: { "agentstorm.task-board": { taskId: "btask_1" } },
+          id: "agent_worker",
+          metadata: { "paseo.task-board": { taskId: "btask_1" } },
         },
       },
       context,
     );
 
-    expect(service.bindAgent).toHaveBeenCalledWith("btask_1", "agent_legacy");
+    expect(service.bindAgent).toHaveBeenCalledWith("btask_1", "agent_worker");
   });
 });

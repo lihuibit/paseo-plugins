@@ -1,11 +1,10 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it } from "vitest";
 import { parseSkillAssetId } from "../shared/core/paths";
 import { repoDir } from "../server/plugin-data";
 import { scanSkills } from "../server/repo";
-import { readConfig, writeConfig } from "../server/registry";
 
 let home: string;
 
@@ -39,36 +38,5 @@ describe("global skill scope removal", () => {
       scope: "project",
       name: "review",
     });
-  });
-
-  it("filters legacy global records on load and save", async () => {
-    await writeConfig({
-      version: 1,
-      bindings: {},
-      skills: {
-        p1: [
-          {
-            assetId: "skill:global/legacy",
-            name: "legacy",
-            provider: "codex",
-            targetPath: "/tmp/legacy",
-            baselineDigest: "x",
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-      },
-      instructions: {},
-      settings: { monitorIntervalMs: 60_000 },
-    });
-    const loaded = await readConfig();
-    expect(loaded.skills.p1).toEqual([]);
-    expect(
-      JSON.parse(
-        await readFile(
-          join(home, "plugin-data/paseo-shared-assets/config.json"),
-          "utf8",
-        ),
-      ).skills.p1,
-    ).toEqual([]);
   });
 });

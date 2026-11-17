@@ -4,15 +4,15 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.4.0` |
-| `task-board`      | `0.3.0` |
+| `shared-assets`   | `0.5.0` |
+| `task-board`      | `0.4.0` |
 | `paseo-board` CLI | `0.2.0` |
 
 - `shared-assets`：把团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 绑定到
   Paseo Project，并投影到 Provider 原生目录。
 - `task-board`：Agent 驱动的任务看板，支持卡片、分配 Agent、启动/停止、
   `agent.turn.*` / `agent.permission.*` / `agent.close.after` hooks、
-  `board_declare`、定时与周期任务、WeCom 通知、父子任务和旧任务迁移。
+  `board_declare`、定时与周期任务、WeCom 通知和父子任务。
 - `paseo-board`：任务看板 CLI，供普通 shell 和外部 Agent（如 Claude Code）使用，
   不需要 MCP，调用方也不需要安装插件。
 
@@ -111,9 +111,9 @@ paseo plugin reload paseo-task-board --home ~/.paseo-dev
   看板顶部显示黄色横幅，状态只能由 hooks 推断。
 - 两个插件的数据都在 `$PASEO_HOME/plugin-data/<plugin-id>/`，插件不写其他 home。
 
-### 0.4.0 / 0.3.0 重命名与迁移
+### 0.5.0 / 0.4.0
 
-这是一个 breaking 版本：插件不再使用 AgentStorm 协议标识。
+这是一个 breaking 版本：插件只使用 Paseo 协议标识，且不再读取旧标识或旧数据目录。
 
 - plugin id：`paseo-shared-assets` / `paseo-task-board`
 - labels：`paseo.board` / `paseo.task-id` / `paseo.kind` / `paseo.board-admin`
@@ -121,21 +121,8 @@ paseo plugin reload paseo-task-board --home ~/.paseo-dev
 - 包名：`paseo-shared-assets` / `paseo-task-board` / `@paseo-plugins/*`
 - 数据目录：`plugin-data/paseo-shared-assets` / `plugin-data/paseo-task-board`
 
-兼容策略：
-
-- 新 Agent 只写 `paseo.*`。看板读取 labels、metadata 和 hook 载荷时同时接受
-  `paseo.*` 与 legacy `agentstorm.*`，旧卡片绑定的 Agent 仍可识别、停止和归档。
-- 新插件第一次启动或收到第一次 RPC 时，如果新 `plugin-data/paseo-*` 目录不存在而旧
-  `plugin-data/agentstorm-*` 存在，会递归复制旧目录。旧目录保留；新目录已存在时不合并。
-- 插件不会自动删除旧 `agentstorm-*` 注册。升级步骤：
-
-```bash
-paseo plugin remove agentstorm-shared-assets --home ~/.paseo-plugin-test
-paseo plugin remove agentstorm-task-board --home ~/.paseo-plugin-test
-scripts/install.sh
-```
-
-旧 `plugin-data/agentstorm-*` 不会被 `plugin remove` 删除，新插件首次启动时复制。
+升级前请自行移除旧插件注册；已经存在的 `plugin-data/paseo-*` 会继续使用，插件不再
+自动复制或改写旧数据目录。
 
 ## 升级
 
@@ -271,17 +258,11 @@ drift 按文件比较上次基线、项目 `.paseo/` 或 Provider 投影副本�
   结果一致；被忽略文件不会产生差异，也不会被提交。
 - 单条 drift 忽略保存在 Workspace 根 `shared-library-ignores.json`，解绑后保留。
 
-### `.agentstorm/` → `.paseo/` 一次性迁移
-
-项目首次被插件访问时，如果 `.paseo/` 不存在而旧 `.agentstorm/` 存在，插件会复制
-`AGENTS.md`、`knowledge/` 和 `docs/` 到 `.paseo/`。`workflows/` 不复制；旧目录只读，
-不删除、不改写。若 `.paseo/` 已存在则以它为准，不合并旧目录。复制结果写入
-`logs/rpc.log`；迁移失败只记录错误，不阻断读取。
+### 项目资产导入
 
 `shared-assets.migrate` 默认 dry-run：从项目 `.paseo/` 导入 `AGENTS.md`、
 `knowledge/*.md`、`docs/<name>/**`；跳过 `workflows/`；Provider 项目级 Skill 只列为
-“可发布候选”。仅在 `.paseo/` 不存在时回退读取旧 `.agentstorm/`。目标内容不同记为
-冲突、不覆盖；源目录只读，执行后源文件仍在。报告包含每个文件的
+“可发布候选”。目标内容不同记为冲突、不覆盖；源目录只读，执行后源文件仍在。报告包含每个文件的
 `import/skip/conflict`、冲突 diff、迁移前后文件数/字节数与 digest；`sourceDigest`
 未变化时直接复用上次记录。
 
@@ -422,7 +403,6 @@ I4 的补齐（permission hooks、定时/周期、WeCom、层级、迁移、UI�
 
 ```bash
 npm run e2e:i4             # dev daemon：定时重启、recurring、permission、WeCom、层级
-npm run e2e:i4-migrate     # 独立 home（6769）：迁移只读与 UI 种子数据
 ```
 
 I12 的 0.15.4 正式版兼容证据（含 0.16.0 回归）在 legacy AgentStorm 仓库（历史证据）：

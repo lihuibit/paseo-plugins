@@ -313,19 +313,8 @@ describe("agent ownership index", () => {
     expect(
       taskIdFromAgent({
         id: "a3",
-        labels: {
-          "agentstorm.board": "1",
-          "agentstorm.task-id": "btask_3",
-        },
       }),
-    ).toBe("btask_3");
-    expect(
-      taskIdFromAgent({
-        id: "a4",
-        metadata: { "agentstorm.task-board": { taskId: "btask_4" } },
-      }),
-    ).toBe("btask_4");
-    expect(taskIdFromAgent({ id: "a5" })).toBeNull();
+    ).toBeNull();
   });
 
   it("rebuilds only known, unarchived board agents", () => {
@@ -351,17 +340,9 @@ describe("agent ownership index", () => {
         },
         archivedAt: T1,
       },
-      {
-        id: "a5",
-        labels: {
-          "agentstorm.board": "1",
-          "agentstorm.task-id": "btask_0000000000000001",
-        },
-      },
     ]);
     expect(index).toEqual({
       a1: "btask_0000000000000001",
-      a5: "btask_0000000000000001",
     });
   });
 });

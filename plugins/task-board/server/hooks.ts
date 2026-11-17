@@ -5,9 +5,6 @@ import {
   BOARD_ADMIN_LABEL,
   BOARD_LABEL,
   BOARD_METADATA_KEY,
-  LEGACY_BOARD_ADMIN_LABEL,
-  LEGACY_BOARD_LABEL,
-  LEGACY_BOARD_METADATA_KEY,
 } from "../shared/core/board/types";
 import { toolsForLabels } from "./board-tools";
 import type { TaskBoardService } from "./service";
@@ -27,9 +24,7 @@ export function registerHooks(
       hookMetadata && typeof hookMetadata === "object"
         ? (hookMetadata as Record<string, unknown>)
         : undefined;
-    const metadata = record
-      ? (record[BOARD_METADATA_KEY] ?? record[LEGACY_BOARD_METADATA_KEY])
-      : undefined;
+    const metadata = record ? record[BOARD_METADATA_KEY] : undefined;
     if (!metadata || typeof metadata !== "object") return;
     const taskId = (metadata as Record<string, unknown>).taskId;
     if (typeof taskId === "string" && taskId.length > 0) {
@@ -38,12 +33,8 @@ export function registerHooks(
   });
 
   server.addHook("agent.open.before", async ({ request }, context) => {
-    const isBoard =
-      request.labels[BOARD_LABEL] === "1" ||
-      request.labels[LEGACY_BOARD_LABEL] === "1";
-    const isAdmin =
-      request.labels[BOARD_ADMIN_LABEL] === "1" ||
-      request.labels[LEGACY_BOARD_ADMIN_LABEL] === "1";
+    const isBoard = request.labels[BOARD_LABEL] === "1";
+    const isAdmin = request.labels[BOARD_ADMIN_LABEL] === "1";
     if (!isBoard && !isAdmin) return;
     await ensureReady(context.paseo);
     await service.bindAgentFromOpen(request.agentId, { ...request.labels });

@@ -22,7 +22,6 @@
     "e2e:task-board": "node scripts/e2e-task-board.mjs",
     "e2e:planning": "node scripts/e2e-planning-tools.mjs",
     "e2e:i4": "node scripts/e2e-i4.mjs",
-    "e2e:i4-migrate": "node scripts/e2e-i4-migrate.mjs",
     "e2e:board-cli": "node scripts/e2e-board-cli.mjs",
     "e2e:planning-smoke": "node scripts/e2e-planning-smoke.mjs",
     "verify": "npm run check:core && npm run typecheck && npm run lint && npm run test"

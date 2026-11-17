@@ -100,7 +100,7 @@ import {
 } from "./ignore";
 import { overwriteDrift } from "./drift-actions";
 import { materializeWorkspace } from "./materialize";
-import { ensureProjectDirectory, migrateLegacy } from "./migration";
+import { migrateLegacy } from "./migration";
 import { listProviderStatuses } from "./providers";
 import { resolveAssetForWorkspace } from "./asset-files";
 import { clearBaselines } from "./baseline";
@@ -224,9 +224,6 @@ async function projects(
 
   const enriched = await Promise.all(
     summaries.map(async (summary) => {
-      if (summary.workspaceDirectory) {
-        await ensureProjectDirectory(summary.workspaceDirectory);
-      }
       const binding = config.bindings[summary.projectId];
       if (!binding) return summary;
       const next = { ...summary, attention: emptyAttention() };
@@ -499,7 +496,6 @@ async function materializeAll(
   for (const workspace of workspaces) {
     const directory = workspace.workspaceDirectory ?? binding.projectRoot;
     try {
-      await ensureProjectDirectory(directory);
       await materializeWorkspace(projectId, directory);
     } catch (error) {
       await logRpc(
@@ -605,7 +601,6 @@ async function workspaceDirectory(
     projectId,
     workspaceId,
   );
-  await ensureProjectDirectory(directory);
   return directory;
 }
 

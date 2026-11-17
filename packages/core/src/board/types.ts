@@ -145,12 +145,6 @@ export const BOARD_KIND_LABEL = "paseo.kind";
 export const BOARD_ADMIN_LABEL = "paseo.board-admin";
 export const BOARD_METADATA_KEY = "paseo.task-board";
 
-export const LEGACY_BOARD_LABEL = "agentstorm.board";
-export const LEGACY_BOARD_TASK_LABEL = "agentstorm.task-id";
-export const LEGACY_BOARD_KIND_LABEL = "agentstorm.kind";
-export const LEGACY_BOARD_ADMIN_LABEL = "agentstorm.board-admin";
-export const LEGACY_BOARD_METADATA_KEY = "agentstorm.task-board";
-
 const AgentExecutionProjectSchema = z
   .object({
     projectId: z.string().min(1),

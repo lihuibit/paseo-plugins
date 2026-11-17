@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -438,7 +438,7 @@ describe("permission and close hooks through the service", () => {
   });
 });
 
-describe("cancel, hierarchy and migration", () => {
+describe("cancel and hierarchy", () => {
   it("archives on cancel and detaches children on delete", async () => {
     const store = new BoardStore();
     const service = new TaskBoardService(store, new AgentIndex());
@@ -471,49 +471,5 @@ describe("cancel, hierarchy and migration", () => {
       (await service.get(child.id)).revision,
     );
     expect(deleted.deleted).toBe(true);
-  });
-
-  it("imports legacy tasks read-only, then no-ops on the same digest", async () => {
-    const source = join(home, "tasks", "tasks.json");
-    await mkdir(join(home, "tasks"), { recursive: true });
-    const legacy = {
-      version: 1,
-      nextNumber: 3,
-      tasks: [
-        {
-          id: "btask_legacy1",
-          displayId: "TASK-1",
-          title: "Legacy card",
-          status: "todo",
-          acceptanceCriteria: ["works"],
-          revision: 2,
-          createdAt: "2026-10-01T00:00:00.000Z",
-          updatedAt: "2026-10-01T00:00:00.000Z",
-          activity: [],
-        },
-      ],
-    };
-    const raw = `${JSON.stringify(legacy, null, 2)}\n`;
-    await writeFile(source, raw);
-    const store = new BoardStore();
-    const service = new TaskBoardService(store, new AgentIndex());
-    const { paseo } = fakePaseo({ missing: true });
-
-    const dry = await service.migrateLegacy(paseo, { dryRun: true });
-    expect(dry.mapped).toHaveLength(1);
-    expect((await store.read()).tasks).toHaveLength(0);
-    expect(await readFile(source, "utf8")).toBe(raw);
-
-    const applied = await service.migrateLegacy(paseo, {
-      dryRun: false,
-    });
-    expect(applied.mapped).toHaveLength(1);
-    expect((await store.read()).tasks).toHaveLength(1);
-    expect(await readFile(source, "utf8")).toBe(raw);
-
-    const again = await service.migrateLegacy(paseo, { dryRun: false });
-    expect(again.noop).toBe(true);
-    expect((await store.read()).tasks).toHaveLength(1);
-    expect(await readFile(source, "utf8")).toBe(raw);
   });
 });

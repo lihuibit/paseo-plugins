@@ -11,6 +11,5 @@ export * from "./manifest";
 export * from "./board/types";
 export * from "./board/state";
 export * from "./board/schedule";
-export * from "./board/migrate";
 export * from "./board/errors";
 export * from "./board/agent-index";

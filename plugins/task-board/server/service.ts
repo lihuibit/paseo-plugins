@@ -1,6 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { BoardError } from "../shared/core/board/errors";
@@ -47,18 +45,10 @@ import {
   type Trigger,
 } from "../shared/core/board/types";
 import {
-  mapLegacyDocument,
-  mergeLegacyTasks,
-} from "../shared/core/board/migrate";
-import {
   preferredTaskForAgent,
   taskIdFromAgent,
 } from "../shared/core/board/agent-index";
-import {
-  BOARD_TASK_LABEL,
-  isTerminalStatus,
-  LEGACY_BOARD_TASK_LABEL,
-} from "../shared/core/board/types";
+import { BOARD_TASK_LABEL, isTerminalStatus } from "../shared/core/board/types";
 import {
   createAgentForTask,
   executionForExistingAgent,
@@ -69,13 +59,7 @@ import { appendDeleted, appendEvent, type BoardStore } from "./store";
 import { rebuildFromPaseo } from "./agent-index";
 import type { AgentIndex } from "./agent-index";
 import { readAgentSummary, type AgentSummary } from "./inspection";
-import {
-  ensureDataDir,
-  legacyTasksPath,
-  migrationsPath,
-  pluginDataDir,
-  paseoHome,
-} from "./plugin-data";
+import { ensureDataDir, pluginDataDir, paseoHome } from "./plugin-data";
 import { BoardSettingsStore } from "./settings";
 import { WeComNotifier, type NotificationEvent } from "./notifier";
 import { cancelAgentViaDaemon } from "./agent-cancel";
@@ -206,15 +190,6 @@ function assertAgentStopped(
   }
 }
 
-async function readJsonFile(path: string): Promise<unknown | null> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as unknown;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
 export interface ListInput {
   status?: BoardStatus;
   projectId?: string;
@@ -296,7 +271,11 @@ export class TaskBoardService {
           const document = await this.store.read();
           const rebuilt = await rebuildFromPaseo(paseo, document.tasks);
           for (const task of document.tasks) {
-            if (task.execution && !rebuilt[task.execution.agentId]) {
+            if (
+              task.execution &&
+              !task.execution.agentId.startsWith("legacy:") &&
+              !rebuilt[task.execution.agentId]
+            ) {
               const refreshed = await paseo.agents
                 .ref(task.execution.agentId)
                 .refresh()
@@ -1476,152 +1455,8 @@ export class TaskBoardService {
     return this.notifier.test(webhookUrl);
   }
 
-  async migrateLegacy(
-    paseo: PaseoApi,
-    input: {
-      dryRun?: boolean;
-      sourcePath?: string;
-      includeFinished?: boolean;
-    } = {},
-  ) {
-    const dryRun = input.dryRun ?? true;
-    const includeFinished = input.includeFinished ?? true;
-    const sourcePath = input.sourcePath ?? legacyTasksPath();
-    let raw: string;
-    try {
-      raw = await readFile(sourcePath, "utf8");
-    } catch (error) {
-      throw new BoardError(
-        "E_MIGRATION_SOURCE",
-        `Cannot read legacy tasks file: ${sourcePath}`,
-        {
-          sourcePath,
-          reason: error instanceof Error ? error.message : String(error),
-        },
-      );
-    }
-    const sourceDigest = createHash("sha256").update(raw).digest("hex");
-    const recordPath = migrationsPath();
-    const history = await readJsonFile(recordPath);
-    const records = Array.isArray(
-      (history as { records?: unknown } | null)?.records,
-    )
-      ? ((history as { records: unknown[] }).records ?? [])
-      : [];
-    if (
-      records.some(
-        (entry) =>
-          typeof entry === "object" &&
-          entry !== null &&
-          (entry as { sourceDigest?: unknown }).sourceDigest === sourceDigest,
-      )
-    ) {
-      return {
-        dryRun,
-        noop: true,
-        sourcePath,
-        sourceDigest,
-        appliedAt: new Date().toISOString(),
-        mapped: [],
-        skipped: [],
-        conflicts: [],
-      };
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw) as unknown;
-    } catch (error) {
-      throw new BoardError(
-        "E_MIGRATION_SOURCE",
-        "Legacy tasks file is not valid JSON",
-        {
-          sourcePath,
-          reason: error instanceof Error ? error.message : String(error),
-        },
-      );
-    }
-
-    const agentIds = new Set<string>();
-    const legacyTasks = Array.isArray(parsed)
-      ? parsed
-      : ((parsed as { tasks?: unknown } | null)?.tasks ?? []);
-    if (Array.isArray(legacyTasks)) {
-      for (const entry of legacyTasks) {
-        if (!entry || typeof entry !== "object") continue;
-        const execution = (entry as { execution?: unknown }).execution;
-        if (!execution || typeof execution !== "object") continue;
-        const agentId = (execution as { agentId?: unknown }).agentId;
-        if (typeof agentId === "string" && agentId.length > 0) {
-          agentIds.add(agentId);
-        }
-      }
-    }
-    const existingAgents = new Set<string>();
-    for (const agentId of agentIds) {
-      const refreshed = await paseo.agents
-        .ref(agentId)
-        .refresh()
-        .catch(() => null);
-      if (refreshed && !refreshed.agent.archivedAt) {
-        existingAgents.add(agentId);
-      }
-    }
-
-    const document = await this.store.read();
-    const now = new Date().toISOString();
-    const result = mapLegacyDocument(parsed, {
-      now,
-      includeFinished,
-      existingTaskIds: new Set(document.tasks.map((task) => task.id)),
-      existingDisplayIds: new Set(document.tasks.map((task) => task.displayId)),
-      nextNumber: document.nextNumber,
-      createId: () => `btask_${randomBytes(8).toString("hex")}`,
-      agentExists: (agentId) => existingAgents.has(agentId),
-    });
-
-    const report = {
-      dryRun,
-      noop: false,
-      sourcePath,
-      sourceDigest,
-      appliedAt: now,
-      mapped: result.report.mapped,
-      skipped: result.report.skipped,
-      conflicts: result.report.conflicts,
-      nextNumber: result.nextNumber,
-    };
-    if (dryRun || result.tasks.length === 0) return report;
-
-    await this.store.transact((current) => ({
-      document: mergeLegacyTasks(current, result.tasks, result.nextNumber),
-      result: null,
-    }));
-    await mkdir(dirname(recordPath), { recursive: true });
-    const temporary = `${recordPath}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(
-      temporary,
-      `${JSON.stringify(
-        { version: 1, records: [...records, report] },
-        null,
-        2,
-      )}\n`,
-    );
-    await rename(temporary, recordPath);
-    await appendEvent({
-      at: now,
-      kind: "migrated",
-      detail: {
-        sourceDigest,
-        mapped: report.mapped.length,
-        skipped: report.skipped.length,
-      },
-    });
-    return report;
-  }
-
   async bindAgentFromOpen(agentId: string, labels: Record<string, string>) {
-    const taskId = labels[BOARD_TASK_LABEL] ?? labels[LEGACY_BOARD_TASK_LABEL];
+    const taskId = labels[BOARD_TASK_LABEL];
     if (!taskId) return;
     const document = await this.store.read();
     const currentId = this.index.taskIdFor(agentId);

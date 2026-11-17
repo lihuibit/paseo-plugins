@@ -34,7 +34,7 @@ describe("planning prompt", () => {
       expect(BUILTIN_PLANNING_PROMPT).toContain(tool);
     }
     expect(BUILTIN_PLANNING_PROMPT).toContain("{{taskId}}");
-    expect(BUILTIN_PLANNING_PROMPT).not.toContain("$AGENTSTORM_CLI");
+    expect(BUILTIN_PLANNING_PROMPT).not.toContain("paseo-board");
     expect(BUILTIN_PLANNING_PROMPT).toContain("同一时间只允许一个子任务");
   });
 

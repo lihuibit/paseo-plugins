@@ -351,36 +351,6 @@ describe("project asset migration", () => {
     });
     expect(repeated.reused).toBe(true);
   });
-
-  it("falls back to .agentstorm only when .paseo is absent", async () => {
-    const legacyWorkspace = await mkdtemp(
-      join(tmpdir(), "shared-assets-legacy-"),
-    );
-    await mkdir(join(legacyWorkspace, ".agentstorm", "knowledge"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(legacyWorkspace, ".agentstorm", "knowledge", "legacy-only.md"),
-      "# Legacy only\n",
-    );
-
-    const report = await migrateLegacy({
-      projectId: "p1",
-      workspaceId: "w2",
-      workspaceDirectory: legacyWorkspace,
-      dryRun: false,
-    });
-    expect(report.applied).toBe(true);
-    expect(
-      await readFile(join(checkout, "knowledge", "legacy-only.md"), "utf8"),
-    ).toContain("Legacy only");
-    expect(
-      await readFile(
-        join(legacyWorkspace, ".agentstorm", "knowledge", "legacy-only.md"),
-        "utf8",
-      ),
-    ).toContain("Legacy only");
-  });
 });
 
 describe("auto sync mode", () => {

@@ -13,25 +13,6 @@ function emptyConfig(): PluginConfig {
   };
 }
 
-/**
- * `skills/global/` was removed as a supported scope. Legacy records stay in
- * the file only until the next load; they must never be managed again.
- */
-export function isLegacyGlobalSkill(assetId: string): boolean {
-  return assetId.startsWith("skill:global/");
-}
-
-function withoutLegacyGlobalSkills(
-  skills: PluginConfig["skills"],
-): PluginConfig["skills"] {
-  return Object.fromEntries(
-    Object.entries(skills).map(([projectId, records]) => [
-      projectId,
-      records.filter((record) => !isLegacyGlobalSkill(record.assetId)),
-    ]),
-  );
-}
-
 const projectQueues = new Map<string, Promise<unknown>>();
 
 export async function readConfig(): Promise<PluginConfig> {
@@ -40,7 +21,7 @@ export async function readConfig(): Promise<PluginConfig> {
   return {
     version: 1,
     bindings: config.bindings ?? {},
-    skills: withoutLegacyGlobalSkills(config.skills ?? {}),
+    skills: config.skills ?? {},
     instructions: config.instructions ?? {},
     settings: {
       monitorIntervalMs:
@@ -54,10 +35,7 @@ export async function readConfig(): Promise<PluginConfig> {
 
 export async function writeConfig(config: PluginConfig): Promise<void> {
   await ensureDataDirs();
-  await writeJson(configPath(), {
-    ...config,
-    skills: withoutLegacyGlobalSkills(config.skills),
-  });
+  await writeJson(configPath(), config);
 }
 
 /** Serializes every mutation for one project, including projection writes. */

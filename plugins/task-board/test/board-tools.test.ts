@@ -300,12 +300,6 @@ describe("board tools", () => {
       declare,
       admin,
     ).map((entry) => entry.name);
-    const legacyAdminNames = toolsForLabels(
-      { "agentstorm.board": "1", "agentstorm.board-admin": "1" },
-      declare,
-      admin,
-    ).map((entry) => entry.name);
-
     expect(adminNames).toEqual(
       expect.arrayContaining([
         "board_list",
@@ -321,7 +315,6 @@ describe("board tools", () => {
       ]),
     );
     expect(workerNames).toEqual(["board_declare"]);
-    expect(legacyAdminNames).toEqual(adminNames);
   });
 
   it("rejects management tools for a non-admin agent", async () => {
@@ -335,21 +328,6 @@ describe("board tools", () => {
     const result = await def.execute({}, context(paseo));
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ code: "E_FORBIDDEN" });
-  });
-
-  it("accepts legacy admin labels", async () => {
-    const service = new TaskBoardService(new BoardStore(), new AgentIndex());
-    const { paseo } = fakePaseo({
-      adminLabels: {
-        "agentstorm.board": "1",
-        "agentstorm.board-admin": "1",
-      },
-    });
-    const def = createBoardAdminTools(service).find(
-      (entry) => entry.name === "board_list",
-    )!;
-    const result = await def.execute({}, context(paseo));
-    expect(result.isError).not.toBe(true);
   });
 
   it("returns readable errors for unknown cards", async () => {

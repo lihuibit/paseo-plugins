@@ -5,8 +5,6 @@ import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import {
   BOARD_LABEL,
   BOARD_TASK_LABEL,
-  LEGACY_BOARD_LABEL,
-  LEGACY_BOARD_TASK_LABEL,
   type BoardTask,
 } from "../shared/core/board/types";
 import {
@@ -48,7 +46,15 @@ export class AgentIndex {
   private index: Record<string, string> = {};
 
   async load(): Promise<void> {
-    this.index = parseIndex(await readJson(agentIndexPath()));
+    const parsed = parseIndex(await readJson(agentIndexPath()));
+    this.index = Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([agentId]) => !agentId.startsWith("legacy:"),
+      ),
+    );
+    if (Object.keys(this.index).length !== Object.keys(parsed).length) {
+      await this.save();
+    }
   }
 
   all(): Record<string, string> {
@@ -103,34 +109,28 @@ export async function rebuildFromPaseo(
   paseo: PaseoApi,
   tasks: readonly BoardTask[],
 ): Promise<Record<string, string>> {
-  const pages = await Promise.all(
-    [BOARD_LABEL, LEGACY_BOARD_LABEL].map((label) =>
-      paseo.agents.list({
-        includeBackground: true,
-        filter: { labels: { [label]: "1" } },
-        page: { limit: 200 },
-      }),
-    ),
-  );
+  const page = await paseo.agents.list({
+    includeBackground: true,
+    filter: { labels: { [BOARD_LABEL]: "1" } },
+    page: { limit: 200 },
+  });
   const known = new Set(tasks.map((task) => task.id));
   const index: Record<string, string> = {};
-  for (const page of pages) {
-    for (const entry of page.entries) {
-      const agent = entry.agent;
-      if (agent.archivedAt) continue;
-      const taskId =
-        agent.labels?.[BOARD_TASK_LABEL] ??
-        agent.labels?.[LEGACY_BOARD_TASK_LABEL] ??
-        taskIdFromAgent(agent);
-      if (!taskId || !known.has(taskId)) continue;
-      index[agent.id] = taskId;
-    }
+  for (const entry of page.entries) {
+    const agent = entry.agent;
+    if (agent.archivedAt) continue;
+    const taskId = agent.labels?.[BOARD_TASK_LABEL] ?? taskIdFromAgent(agent);
+    if (!taskId || !known.has(taskId)) continue;
+    index[agent.id] = taskId;
   }
   const agentIds = new Set([
     ...Object.keys(index),
     ...tasks
       .map((task) => task.execution?.agentId)
-      .filter((agentId): agentId is string => Boolean(agentId)),
+      .filter(
+        (agentId): agentId is string =>
+          typeof agentId === "string" && !agentId.startsWith("legacy:"),
+      ),
   ]);
   for (const agentId of agentIds) {
     const preferred = preferredTaskForAgent(tasks, agentId);

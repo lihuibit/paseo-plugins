@@ -1,10 +1,10 @@
 # Task Board（`paseo-task-board`）
 
-版本：`0.3.0`。
+版本：`0.4.0`。
 
 Paseo 任务看板插件：卡片、分配 Agent、启动/停止、生命周期 hooks 驱动状态、
 Agent 主动调用的 `board_declare` 工具，以及定时/周期、WeCom 通知、父子任务和
-旧任务迁移。只支持 Agent 执行，不包含 Pipeline。
+层级管理。只支持 Agent 执行，不包含 Pipeline。
 
 ## 环境要求
 
@@ -46,26 +46,11 @@ $PASEO_HOME/plugin-data/paseo-task-board/
 ├── deleted.jsonl       # 删除审计
 ├── settings.json       # WeCom、时区（0600）
 ├── notifications.jsonl # 通知发送与重试记录
-├── migrations/tasks.json
 └── locks/scheduler.lock
 ```
 
 `tasks.json` 每次写入走串行队列 + 临时文件原子替换。插件重启后从磁盘恢复卡片和绑定；
 没有 label 的 Agent 不会进入索引。
-
-### 从 `agentstorm-task-board` 升级
-
-0.3.0 起 plugin id 改为 `paseo-task-board`。先移除旧注册，再安装新插件：
-
-```bash
-paseo plugin remove agentstorm-task-board --home ~/.paseo-dev
-paseo plugin install "$PWD/plugins/task-board" --home ~/.paseo-dev
-```
-
-旧 `plugin-data/agentstorm-task-board/` 会保留；新插件首次启动时如果
-`plugin-data/paseo-task-board/` 不存在，会递归复制旧目录（tasks、settings、
-bindings、events 等）。新目录已存在时不合并。旧 Agent 上的 `agentstorm.*`
-labels/metadata 继续被读取，新 Agent 只写 `paseo.*`。
 
 ## RPC
 
@@ -102,7 +87,6 @@ labels/metadata 继续被读取，新 Agent 只写 `paseo.*`。
 | `task-board.providers`           | Provider 目录，可附带单个 Provider 的模型   |
 | `task-board.settings.get/update` | 读取/更新 WeCom 通知设置                    |
 | `task-board.notifications.test`  | 发送测试消息并返回每次尝试                  |
-| `task-board.migrate-legacy`      | 只读导入 `$PASEO_HOME/tasks/tasks.json`     |
 | `task-board.health`              | 数据目录、绑定数、MCP 注入、调度器状态      |
 
 ### 外部 CLI
@@ -138,7 +122,6 @@ cp -r skills/paseo-board ~/.codex/skills/
   `paseo.kind=task`。
 - 同时写入 metadata `paseo.task-board.taskId`。`agent.turn.*` 载荷不含 labels，
   因此 hook 先用 `agentIndex.json`，再用 metadata 兜底。
-- 读取时同时接受 legacy `agentstorm.*` labels/metadata，旧 Agent 不需要重建。
 - 只处理 `execution.agentId` 与事件 Agent 一致的卡片；用户自己的 Agent 不进入索引。
 - `agent.turn.before`：`todo` / `in_review` / `blocked` → `in_progress`，清理旧声明。
 - `agent.turn.after`：`completed` → `in_review`；`failed` → `blocked(agent_error)`；
@@ -176,7 +159,7 @@ cp -r skills/paseo-board ~/.codex/skills/
 - 去重键 `taskId + revision + event`；每任务按 `minIntervalMs` 限流。
 - 失败按 1s / 5s / 15s 退避重试，每次尝试写入 `notifications.jsonl`；发送失败不影响卡片。
 
-## 层级、取消与迁移
+## 层级与取消
 
 - `hierarchyParentId` 是人建树关系；父卡只展示子任务进度汇总，不自动推进父状态。
 - `delete` 先 stop 再 archive，子任务变顶层，并写 `deleted.jsonl`。
@@ -184,9 +167,6 @@ cp -r skills/paseo-board ~/.codex/skills/
 - `cancel` 取消 turn、归档 Agent，卡片 `cancelled` + `executionArchive=final`；不提供
   unarchive。`done`、`cancelled`、`delete` 都会归档 Agent 并从 `agentIndex` 解绑；
   归档失败只记日志，不阻断卡片状态。
-- `migrate-legacy` 默认 dry-run；只读源文件并记录 sha256。`id` 冲突会重映射，
-  未知状态回落 `planning`，`pipeline` 执行体丢弃，Agent 执行体仅在 Paseo 仍存在时保留。
-  同一 `sourceDigest` 重复执行返回 no-op。
 
 ## `board_declare`
 
@@ -284,10 +264,9 @@ npm test --workspace plugins/task-board
 ```bash
 E2E_PROJECT_ID=<prj_id> E2E_WORKSPACE_ID=<wks_id> npm run e2e:task-board
 npm run e2e:i4
-npm run e2e:i4-migrate
 E2E_PASEO_HOME=~/.paseo-plugin-test E2E_PASEO_PORT=6769 npm run e2e:planning
 ```
 
-I2 / I4 的实测截图、日志与落盘快照在 legacy AgentStorm 仓库（历史证据）
+I2 / I4 的实测截图、日志与落盘快照在历史证据仓库
 `docs/plugins/evidence/implementation/I2/`、`.../I4/`。
 规划任务工具的独立 home 端到端记录在 `.../I6/`。

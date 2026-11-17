@@ -1,7 +1,7 @@
 # Shared Assets (Paseo plugin)
 
-版本：`0.4.0`。plugin id 改为 `paseo-shared-assets`；项目内本地目录从
-`.agentstorm/` 改为 `.paseo/`。升级前请阅读本节。
+版本：`0.5.0`。plugin id 为 `paseo-shared-assets`；项目内本地目录统一使用
+`.paseo/`。
 
 团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 的项目级投影。
 共享库只支持 `skills/project/<name>/`；`skills/global/` 已废弃，即使目录存在也不会
@@ -49,23 +49,8 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
 - `repos/<projectId>/`：共享仓库 checkout
 - `logs/rpc.log`：RPC 错误
 
-0.4.0 起 plugin id 和 `plugin-data/paseo-shared-assets/` 目录改为 Paseo 前缀。
-旧 `plugin-data/agentstorm-shared-assets/` 不删除；新插件首次启动时如果新目录不存在
-会递归复制旧目录。新目录已存在时不合并。
-
-升级步骤：
-
-```bash
-paseo plugin remove agentstorm-shared-assets --home ~/.paseo-dev
-paseo plugin install "$PWD/plugins/shared-assets" --home ~/.paseo-dev
-```
-
 卸载插件不会删除项目内 `.paseo/`、`.codex/skills/`、`.claude/skills/` 等文件。
 旧版本留下的 `skill:global/*` 投影文件会保留，但不再被读取、同步或删除；需要时请手动清理。
-
-项目首次访问时若 `.paseo/` 不存在而旧 `.agentstorm/` 存在，插件会只读复制
-`AGENTS.md`、`knowledge/`、`docs/` 到 `.paseo/`；`workflows/` 不复制，旧目录保留。
-`.paseo/` 已存在时不合并旧目录。
 
 ## 已知限制
 

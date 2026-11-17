@@ -24,7 +24,6 @@ import {
   listSummaryRpc,
   listRpc,
   logsRpc,
-  migrateLegacyRpc,
   notificationsTestRpc,
   profilesListRpc,
   providerOptionsRpc,
@@ -389,11 +388,6 @@ export default function contribute(server: PluginServerContext) {
     await ensureReady(context.paseo);
     return respond(() => service.testNotification(webhookUrl));
   });
-  server.handle(migrateLegacyRpc, async (input, context) => {
-    await ensureReady(context.paseo);
-    return respond(() => service.migrateLegacy(context.paseo, input));
-  });
-
   registerHooks(server, service, declareTool, adminTools, ensureReady);
 
   return async () => {
