@@ -3,11 +3,19 @@
   "version": "0.4.0",
   "name": "Task Board",
   "description": "Agent-driven task board: cards, assignment, lifecycle hooks and board_declare.",
+  "icon": "assets/icon.png",
+  "media": [
+    "assets/screenshot-board.png",
+    "assets/screenshot-list.png",
+    "assets/screenshot-detail.png"
+  ],
+  "translations": {
+    "zh-CN": {
+      "name": "任务看板",
+      "description": "由 Agent 驱动的任务看板：卡片、分配、生命周期 hooks 与 board_declare。"
+    }
+  },
   "requirements": {
     "paseo": ">=0.15.4 <0.17.0"
-  },
-  "build": [
-    ["npm", "ci", "--prefix", "../..", "--no-audit", "--no-fund"],
-    ["npm", "run", "sync:core", "--prefix", "../.."]
-  ]
+  }
 }

@@ -1,4 +1,4 @@
-import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
+import type { PaseoAgent, PaseoApi } from "./paseo-types";
 import { BoardError } from "../shared/core/board/errors";
 import type { BoardActivity, BoardTask } from "../shared/core/board/types";
 

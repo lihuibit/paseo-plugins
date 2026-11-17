@@ -17,8 +17,6 @@ Agent 主动调用的 `board_declare` 工具，以及定时/周期、WeCom 通�
 
 ```bash
 cd ~/code/funny_projects/paseo-plugins
-npm install
-npm run sync:core
 
 paseo plugin install "$PWD/plugins/task-board" --home ~/.paseo-dev
 paseo plugin ls --home ~/.paseo-dev

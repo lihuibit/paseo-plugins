@@ -1,4 +1,4 @@
-import type { PaseoApi, PaseoAgentHandle } from "@getpaseo/client";
+import type { PaseoAgentHandle, PaseoApi } from "./paseo-types";
 import { BoardError } from "../shared/core/board/errors";
 import {
   BOARD_ADMIN_LABEL,

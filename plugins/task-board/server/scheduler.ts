@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PaseoApi } from "./paseo-types";
 import { locksDir, schedulerLockPath } from "./plugin-data";
 
 const TICK_MS = 5_000;

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import WebSocket from "ws";
 
 const RESPONSE_TIMEOUT_MS = 15_000;
 
@@ -113,7 +112,7 @@ export async function cancelAgentViaDaemon(agentId: string): Promise<void> {
   const requestId = randomUUID();
 
   await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new globalThis.WebSocket(url);
     let settled = false;
     let requested = false;
     const timer = setTimeout(
@@ -136,7 +135,7 @@ export async function cancelAgentViaDaemon(agentId: string): Promise<void> {
       else resolve();
     }
 
-    socket.on("open", () => {
+    socket.addEventListener("open", () => {
       socket.send(
         JSON.stringify({
           type: "hello",
@@ -163,10 +162,11 @@ export async function cancelAgentViaDaemon(agentId: string): Promise<void> {
       );
     }
 
-    socket.on("message", (data) => {
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
       let message: unknown;
       try {
-        message = JSON.parse(data.toString());
+        message = JSON.parse(event.data);
       } catch {
         return;
       }
@@ -206,10 +206,13 @@ export async function cancelAgentViaDaemon(agentId: string): Promise<void> {
       }
     });
 
-    socket.on("error", (error) => {
-      finish(error instanceof Error ? error : new Error(String(error)));
+    socket.addEventListener("error", (event) => {
+      const detail = event as ErrorEvent;
+      const error =
+        detail.error ?? (detail.message ? new Error(detail.message) : null);
+      finish(error instanceof Error ? error : new Error("WebSocket error"));
     });
-    socket.on("close", () => {
+    socket.addEventListener("close", () => {
       finish(
         new Error(
           "The Paseo daemon closed the connection before acknowledging the cancel",

@@ -1,4 +1,4 @@
-import type { PaseoAgent } from "@getpaseo/client";
+import type { PaseoAgent } from "./paseo-types";
 
 export type PendingPermission = PaseoAgent["pendingPermissions"][number];
 

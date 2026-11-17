@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
+import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "./paseo-types";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { BoardError } from "../shared/core/board/errors";
 import {

@@ -32,7 +32,6 @@
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^22.19.0",
     "@types/react": "~19.2.0",
-    "@types/ws": "^8.18.2",
     "eslint": "^9.39.1",
     "prettier": "^3.6.2",
     "react": "19.1.0",
@@ -40,7 +39,6 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vitest": "^3.2.7",
-    "ws": "^8.23.0",
     "zod": "^4.4.3"
   }
 }

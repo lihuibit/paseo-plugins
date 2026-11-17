@@ -6,6 +6,9 @@
   "description": "Git-backed team skills, instructions, knowledge and docs for Paseo projects",
   "files": [
     "paseo-plugin.json",
+    "OVERVIEW.md",
+    "OVERVIEW.*.md",
+    "assets/",
     "index.client.tsx",
     "index.server.ts",
     "client/",

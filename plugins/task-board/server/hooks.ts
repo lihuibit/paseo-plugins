@@ -1,6 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { AgentToolDefinition } from "@getpaseo/plugin/server";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PaseoApi } from "./paseo-types";
 import {
   BOARD_ADMIN_LABEL,
   BOARD_LABEL,

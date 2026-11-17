@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
+import type { PaseoApi } from "./paseo-types";
 import {
   BOARD_LABEL,
   BOARD_TASK_LABEL,

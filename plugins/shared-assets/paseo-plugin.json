@@ -3,11 +3,15 @@
   "version": "0.5.0",
   "name": "Shared Assets",
   "description": "Team Git-backed skills, AGENTS.md, knowledge and docs for Paseo projects.",
+  "icon": "assets/icon.png",
+  "media": ["assets/screenshot-projects.png", "assets/screenshot-detail.png"],
+  "translations": {
+    "zh-CN": {
+      "name": "共享资产",
+      "description": "项目级、由 Git 托管的团队 Skills、AGENTS.md、经验库与文档。"
+    }
+  },
   "requirements": {
     "paseo": ">=0.15.4 <0.17.0"
-  },
-  "build": [
-    ["npm", "ci", "--prefix", "../..", "--no-audit", "--no-fund"],
-    ["npm", "run", "sync:core", "--prefix", "../.."]
-  ]
+  }
 }

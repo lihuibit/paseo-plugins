@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import type { PaseoApi, PaseoProject, PaseoWorkspace } from "@getpaseo/client";
+import type { PaseoApi, PaseoProject, PaseoWorkspace } from "./paseo-types";
 import { PluginError } from "../shared/core/errors";
 import type { WorkspaceSummary } from "../shared/core/types";
 
