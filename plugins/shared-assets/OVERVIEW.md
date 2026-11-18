@@ -8,15 +8,22 @@ its binding state and the assets that are synced, changed, unpublished or in con
 
 A bound repository contains `team-assets.json` and one or more of `skills/project/<name>/`,
 `knowledge/`, `docs/` and `AGENTS.md`. The plugin clones the repository into its plugin data
-directory, scans those directories, and materializes managed copies into the project's provider
-directories. It keeps a baseline per asset, so the detail view can show whether the shared copy,
-the local copy or both changed.
+directory and scans those directories. A shared or published Skill has one entity at
+`.paseo/skills/<name>`. Provider directories such as `.codex/skills/<name>`,
+`.claude/skills/<name>` and `.pi/skills/<name>` are relative symlinks to that entity. A local,
+not-yet-published Skill stays in the provider directory where it was created. If the platform
+cannot create symlinks, the plugin falls back to a copy and reports that projection as a copy.
+Editing `.paseo/skills/<name>` changes every provider linked to it.
+
+The plugin keeps a baseline per asset, so the detail view can show whether the shared copy, the
+local copy or both changed.
 
 The project detail view groups assets by skills, prompt, knowledge and docs, and by provider. From
 there you can add a shared asset to the project, link an existing local copy, sync changes in either
 direction, compare and merge, publish selected local assets, or remove a link. Batch actions and
-ignore rules are available for larger repositories. Publishing creates a commit in the local
-checkout and reports the push hint; it does not push automatically.
+ignore rules are available for larger repositories. Publishing a local Skill moves it to
+`.paseo/skills/<name>` and links its providers. Publishing creates a commit in the local checkout
+and reports the push hint; it does not push automatically.
 
 ## Setup
 
@@ -31,8 +38,10 @@ checkout and reports the push hint; it does not push automatically.
 
 - Read and write the configured repository checkout under the plugin data directory, and read the
   project workspace when scanning local assets or materializing skills.
-- Write managed copies into the project's provider directories, such as `.paseo/`, `.codex/skills/`
-  and `.claude/skills/`. Files that were not created by the plugin are left alone.
+- Maintain one entity per shared Skill under `.paseo/skills/` and create relative provider links
+  under `.codex/skills/`, `.claude/skills/` and `.pi/skills/`. When symlinks are unavailable, it
+  writes a copy and marks that projection as a copy. Files not created by the plugin are left
+  alone.
 - Credential files such as `.env`, `.npmrc`, private keys and certificate files are excluded from
   scanning, diffs, publish previews and commits.
 - Network access is limited to the configured Git remote. No telemetry is sent.

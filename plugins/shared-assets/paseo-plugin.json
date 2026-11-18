@@ -4,7 +4,11 @@
   "name": "Shared Assets",
   "description": "Team Git-backed skills, AGENTS.md, knowledge and docs for Paseo projects.",
   "icon": "assets/icon.png",
-  "media": ["assets/screenshot-projects.png", "assets/screenshot-detail.png"],
+  "media": [
+    "assets/screenshot-projects.png",
+    "assets/screenshot-detail.png",
+    "assets/screenshot-skill-entity.png"
+  ],
   "translations": {
     "zh-CN": {
       "name": "共享资产",

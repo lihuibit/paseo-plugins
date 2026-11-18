@@ -211,18 +211,19 @@ $PASEO_HOME/plugin-data/paseo-shared-assets/
 
 ## 投影
 
-| 资产             | 项目位置                                          |
-| ---------------- | ------------------------------------------------- |
-| Skill            | `.codex/skills/<name>/`、`.claude/skills/<name>/` |
-| 共享 `AGENTS.md` | `.paseo/AGENTS.md`（canonical）                   |
-| Codex 入口       | 项目根 `AGENTS.md`（符号链接，失败时受管副本）    |
-| Claude 入口      | `.claude/CLAUDE.md`（符号链接，失败时受管副本）   |
+| 资产             | 项目位置                                                                |
+| ---------------- | ----------------------------------------------------------------------- |
+| Skill            | `.paseo/skills/<name>/`（唯一实体）                                     |
+| Provider 软链    | `.codex/skills/<name>/`、`.claude/skills/<name>/`、`.pi/skills/<name>/` |
+| 共享 `AGENTS.md` | `.paseo/AGENTS.md`（canonical）                                         |
+| Codex 入口       | 项目根 `AGENTS.md`（符号链接，失败时受管副本）                          |
+| Claude 入口      | `.claude/CLAUDE.md`（符号链接，失败时受管副本）                         |
 
 规则：
 
 - 已存在的用户文件进入冲突，不覆盖。
 - 内容一致时不重复写盘。
-- 停用 Skill 只删除基线未变的受管副本；本地改过的副本保留。
+- 停用 Skill 只删除插件创建的 Provider 软链；回退为复制时只删除基线未变的副本。
 - 停用/解绑指令入口只删除本插件创建的链接/受管副本，保留 `.paseo/AGENTS.md`。
 - 解绑时若 checkout 有未提交改动或未推送提交会被拒绝；推送或显式 `force` 后才能解绑。
 - 卸载插件不删除任何项目内文件。

@@ -4,6 +4,8 @@
 `.paseo/`。
 
 团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 的项目级投影。
+已发布或已关联的 Skill 只有一个实体，位于 `.paseo/skills/<name>`；Provider 目录是指向
+该实体的相对软链。本地新建、尚未发布的 Skill 留在创建它的 Provider 目录。
 共享库只支持 `skills/project/<name>/`；`skills/global/` 已废弃，即使目录存在也不会
 被扫描或管理。
 
@@ -22,13 +24,15 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
 3. 详情顶部显示项目路径、作用域工作区与忽略规则；未绑定时填写 Git URL、分支和同步模式。
 4. 绑定后可同步、重新绑定、解绑；解绑不会删除项目内的受管副本或本地修改。
 5. Skills / SYSTEM Prompt / 经验库 / 项目文档按资产类型与 Provider 分组：
-   - 共享资产可「添加到本地」；同名本地资产显示为候选，可选择「保留本地」或
+   - 共享资产可「添加到本地」；共享 Skill 的实体会写入 `.paseo/skills/<name>`，Provider
+     目录创建指向实体的相对软链；软链不可用时回退复制并标注。
+   - 本地新建、尚未发布的 Skill 留在原 Provider 目录；同名本地资产显示为候选，可选择「保留本地」或
      「使用共享版本」建立关联（adopt）。
    - 已关联资产按 `synced / remote-update / local-update / diverged / remote-deleted`
      展示，并支持同步到本地、选择发布、三方合并、放弃本地修改。
    - 只有本地、尚未进入共享库的资产显示为 `unpublished-local`，卡片会提示
      「本地有未发布内容」，可「选择发布」「放弃本地修改」或「移除关联」。
-   - 「移除关联」可选择是否同时删除本地受管副本；有未保存修改时先给出警告。
+   - 「移除关联」可选择是否同时删除本地 Provider 投影；有未保存修改时先给出警告。
    - 批量模式支持批量关联、批量同步、批量发布和批量解除关联。
 6. 每个资产 tab 底部固定发布栏显示「已选择 N 项本地 <资产类型>」，可全选可发布项并
    预览发布。本地私有资产同样可勾选，预览会显示「将创建新的共享资产」；预览过期
@@ -56,4 +60,5 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
 
 Claude 只验证了目录约定，未做真实模型加载；Codex 目录已在 S4 验证。Provider 只要有
 已知的项目级 Skill 目录就会出现在 tabs 中，未验证项会明确标注。共享 `skills/global/`
-不再支持；迁移时只导入受支持的资产类型。
+不再支持；迁移时只导入受支持的资产类型。平台不支持软链时，Provider 目录使用复制，
+界面会标注为复制。
