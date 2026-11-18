@@ -374,6 +374,42 @@ export const publishCommitRpc = defineRpc({
   output: envelope(PublishCommitResultSchema),
 });
 
+export const RemoveSharedAssetsResultSchema = z.object({
+  commit: z.string().min(1).nullable(),
+  pushed: z.literal(false),
+  pushHint: z.string().min(1),
+  removed: z.array(
+    z.object({
+      assetId: z.string().min(1),
+      path: z.string().min(1),
+    }),
+  ),
+  keptLocal: z.array(z.string().min(1)),
+  failures: z.array(
+    z.object({
+      assetId: z.string().min(1),
+      reason: z.string().min(1),
+    }),
+  ),
+});
+
+export type RemoveSharedAssetsResult = z.infer<
+  typeof RemoveSharedAssetsResultSchema
+>;
+
+export const assetsRemoveRpc = defineRpc({
+  name: "shared-assets.assets.remove",
+  input: z
+    .object({
+      projectId: z.string().min(1),
+      assetIds: z.array(z.string().min(1)).min(1).max(200),
+      deleteLocal: z.boolean().default(false),
+      expectedRevision: z.string().min(1),
+    })
+    .strict(),
+  output: envelope(RemoveSharedAssetsResultSchema),
+});
+
 export const ProviderStatusSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),

@@ -20,10 +20,12 @@ local copy or both changed.
 
 The project detail view groups assets by skills, prompt, knowledge and docs, and by provider. From
 there you can add a shared asset to the project, link an existing local copy, sync changes in either
-direction, compare and merge, publish selected local assets, or remove a link. Batch actions and
-ignore rules are available for larger repositories. Publishing a local Skill moves it to
-`.paseo/skills/<name>` and links its providers. Publishing creates a commit in the local checkout
-and reports the push hint; it does not push automatically.
+direction, compare and merge, publish selected local assets, or remove a link. Shared assets can
+also be deleted from the repository with a local commit; local copies may be kept as unpublished
+or removed together. Batch actions and ignore rules are available for larger repositories.
+Publishing a local Skill moves it to `.paseo/skills/<name>` and links its providers. Publishing
+and deleting create a commit in the local checkout and report the push hint; neither pushes
+automatically.
 
 ## Setup
 

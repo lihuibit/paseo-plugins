@@ -1,6 +1,6 @@
 # Shared Assets (Paseo plugin)
 
-版本：`0.6.0`。plugin id 为 `paseo-shared-assets`；项目内本地目录统一使用
+版本：`0.7.0`。plugin id 为 `paseo-shared-assets`；项目内本地目录统一使用
 `.paseo/`。
 
 团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 的项目级投影。
@@ -33,6 +33,8 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
    - 只有本地、尚未进入共享库的资产显示为 `unpublished-local`，卡片会提示
      「本地有未发布内容」，可「选择发布」「放弃本地修改」或「移除关联」。
    - 「移除关联」可选择是否同时删除本地 Provider 投影；有未保存修改时先给出警告。
+   - 「删除共享资产」会从共享仓库移除资产并创建本地 commit（不自动 push），可选择保留
+     本地副本转为未发布，或一并删除本地文件。
    - 批量模式支持批量关联、批量同步、批量发布和批量解除关联。
 6. 每个资产 tab 底部固定发布栏显示「已选择 N 项本地 <资产类型>」，可全选可发布项并
    预览发布。本地私有资产同样可勾选，预览会显示「将创建新的共享资产」；预览过期

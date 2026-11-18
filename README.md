@@ -4,7 +4,7 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.6.0` |
+| `shared-assets`   | `0.7.0` |
 | `task-board`      | `0.4.0` |
 | `paseo-board` CLI | `0.2.0` |
 
@@ -110,6 +110,13 @@ paseo plugin reload paseo-task-board --home ~/.paseo-dev
 - 看板 Agent 的 `board_declare` 需要 `daemon.mcp.injectIntoAgents: true`；未开启时
   看板顶部显示黄色横幅，状态只能由 hooks 推断。
 - 两个插件的数据都在 `$PASEO_HOME/plugin-data/<plugin-id>/`，插件不写其他 home。
+
+### 0.7.0（shared-assets）
+
+- 新增 `shared-assets.assets.remove`：批量删除共享仓库中的 Skill、Doc、Knowledge 和
+  AGENTS.md，使用 `git rm` + 本地 commit，不自动 push。
+- 删除时默认保留本地副本并转为未发布；`deleteLocal: true` 会一并删除本地实体或文件。
+- UI 增加单条与批量删除入口、二次确认、commit 信息与 push 提示。
 
 ### 0.6.0（shared-assets，breaking）
 

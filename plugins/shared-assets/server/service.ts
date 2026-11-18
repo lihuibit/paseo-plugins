@@ -16,6 +16,7 @@ import type {
 } from "../shared/core/types";
 import {
   assetsListRpc,
+  assetsRemoveRpc,
   assetReadRpc,
   batchPublishCommitRpc,
   batchPublishPreviewRpc,
@@ -92,6 +93,7 @@ import { listDrift } from "./drift";
 import { assetDiff } from "./diff";
 import { applyMerge, previewMerge } from "./merge";
 import { commitBatchPublish, previewBatchPublish } from "./batch-publish";
+import { removeSharedAssets } from "./remove-assets";
 import {
   readDriftIgnores,
   readSharedIgnoreRules,
@@ -832,6 +834,27 @@ export function registerHandlers(server: PluginServerContext): void {
           binding.state.dirty = false;
           binding.revision += 1;
           await saveBinding(binding);
+        }
+        return result;
+      });
+    }),
+  );
+
+  server.handle(assetsRemoveRpc, async (input) =>
+    respond(async () => {
+      await requireBinding(input.projectId);
+      return withProjectLock(input.projectId, async () => {
+        const result = await removeSharedAssets(input);
+        if (result.commit) {
+          const config = await readConfig();
+          const binding = config.bindings[input.projectId];
+          if (binding) {
+            binding.state.localRevision = result.commit;
+            binding.state.ahead += 1;
+            binding.state.dirty = false;
+            binding.revision += 1;
+            await saveBinding(binding);
+          }
         }
         return result;
       });

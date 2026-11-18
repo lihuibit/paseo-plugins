@@ -27,10 +27,12 @@ import type {
   RelationshipListResult,
   UnlinkResult,
 } from "../shared/core/types";
+import type { RemoveSharedAssetsResult } from "../shared/contracts";
 import type { RpcEnvelope } from "../shared/core/errors";
 import {
   batchPublishCommitRpc,
   batchPublishPreviewRpc,
+  assetsRemoveRpc,
   configureRpc,
   diffRpc,
   driftIgnoreRpc,
@@ -927,6 +929,7 @@ function ProjectDetail({
   const mergeApplyCall = useRpc(mergeApplyRpc);
   const batchPreviewCall = useRpc(batchPublishPreviewRpc);
   const batchCommitCall = useRpc(batchPublishCommitRpc);
+  const assetsRemoveCall = useRpc(assetsRemoveRpc);
   const workspacePullCall = useRpc(workspacePullRpc);
   const [status, setStatus] = useState<Binding | null>(null);
   const [drift, setDrift] = useState<DriftItem[]>([]);
@@ -956,6 +959,9 @@ function ProjectDetail({
   const [batchUnlink, setBatchUnlink] = useState<AssetRelationshipRow[] | null>(
     null,
   );
+  const [removeTargets, setRemoveTargets] = useState<
+    AssetRelationshipRow[] | null
+  >(null);
   const [preview, setPreview] = useState<BatchPublishPreview | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [diffDialog, setDiffDialog] = useState<{
@@ -1391,6 +1397,69 @@ function ProjectDetail({
     }
   };
 
+  const confirmRemoveShared = async (
+    rows: AssetRelationshipRow[],
+    deleteLocal: boolean,
+  ) => {
+    const expectedRevision = status?.state.localRevision;
+    if (rows.length === 0 || !expectedRevision) {
+      setError("无法读取共享 checkout 的当前提交，请先刷新项目状态");
+      return;
+    }
+    const assetIds = rows
+      .map((row) => row.shared?.assetId)
+      .filter((value): value is string => Boolean(value));
+    if (assetIds.length === 0) return;
+    setBusy("remove-shared");
+    setError(null);
+    try {
+      const result = unwrap(
+        await assetsRemoveCall({
+          projectId: project.projectId,
+          assetIds,
+          deleteLocal,
+          expectedRevision,
+        }),
+      ) as RemoveSharedAssetsResult;
+      setRemoveTargets(null);
+      if (result.commit) {
+        setNotice(
+          `已从共享仓库删除 ${result.removed.length} 项 · ${result.commit.slice(0, 8)} · 未自动 push，请执行 git push${
+            result.failures.length > 0
+              ? ` · ${result.failures.length} 项失败`
+              : ""
+          }`,
+        );
+      } else {
+        setNotice("没有可删除的共享资产，未创建 commit");
+      }
+      if (result.failures.length > 0) {
+        setError(
+          result.failures
+            .map((failure) => `${failure.assetId}: ${failure.reason}`)
+            .join("\n"),
+        );
+      }
+      reload();
+      onChanged();
+    } catch (value) {
+      if (isRevisionConflict(value)) {
+        try {
+          unwrap(await syncCall({ projectId: project.projectId }));
+          setNotice("共享仓库已有新提交，已拉取最新版本，请重新确认删除");
+          setError(null);
+          reload();
+        } catch (refreshError) {
+          setError(messageOf(refreshError));
+        }
+      } else {
+        setError(messageOf(value));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const publishableRows = (relationships?.rows ?? []).filter(
     (row) => row.local !== null,
   );
@@ -1561,6 +1630,7 @@ function ProjectDetail({
   const batchUnlinkable = batchRows.filter(
     (row) => row.relationship === "linked",
   );
+  const batchRemovable = batchRows.filter((row) => row.shared !== null);
   const batchPublishRows = batchRows.filter((row) => row.local !== null);
   const batchSelectableCount = allRows.filter(
     (row) =>
@@ -2144,6 +2214,7 @@ function ProjectDetail({
                 )
               }
               onUnlink={(row) => setUnlink(row)}
+              onRemoveShared={(row) => setRemoveTargets([row])}
               onDiff={(row) => void openDiff(row)}
               onMerge={(row) => void openMerge(row)}
               onDiscard={(row) =>
@@ -2213,6 +2284,7 @@ function ProjectDetail({
           batchSyncable={batchSyncable.length}
           batchPublishable={batchPublishRows.length}
           batchUnlinkable={batchUnlinkable.length}
+          batchRemovable={batchRemovable.length}
           busy={busy !== null}
           onSelectAllPublishable={selectAllPublishable}
           onPreview={() => void previewPublish()}
@@ -2277,6 +2349,7 @@ function ProjectDetail({
             void previewPublish(batchPublishItems);
           }}
           onBatchUnlink={() => setBatchUnlink(batchUnlinkable)}
+          onBatchRemove={() => setRemoveTargets(batchRemovable)}
         />
       ) : null}
 
@@ -2305,6 +2378,17 @@ function ProjectDetail({
         onClose={() => setBatchUnlink(null)}
         onConfirm={(deleteLocal) => {
           if (batchUnlink) void confirmBatchUnlink(batchUnlink, deleteLocal);
+        }}
+      />
+      <RemoveSharedAssetsDialog
+        rows={removeTargets ?? []}
+        tokens={tokens}
+        busy={busy === "remove-shared"}
+        expectedRevision={status?.state.localRevision ?? null}
+        onClose={() => setRemoveTargets(null)}
+        onConfirm={(deleteLocal) => {
+          if (removeTargets)
+            void confirmRemoveShared(removeTargets, deleteLocal);
         }}
       />
       <UnbindDialog
@@ -2637,6 +2721,7 @@ function PublishFooter({
   batchSyncable,
   batchPublishable,
   batchUnlinkable,
+  batchRemovable,
   busy,
   onSelectAllPublishable,
   onPreview,
@@ -2647,6 +2732,7 @@ function PublishFooter({
   onBatchSync,
   onBatchPublish,
   onBatchUnlink,
+  onBatchRemove,
 }: {
   tokens: Tokens;
   compact: boolean;
@@ -2661,6 +2747,7 @@ function PublishFooter({
   batchSyncable: number;
   batchPublishable: number;
   batchUnlinkable: number;
+  batchRemovable: number;
   busy: boolean;
   onSelectAllPublishable: () => void;
   onPreview: () => void;
@@ -2671,6 +2758,7 @@ function PublishFooter({
   onBatchSync: () => void;
   onBatchPublish: () => void;
   onBatchUnlink: () => void;
+  onBatchRemove: () => void;
 }) {
   return (
     <View
@@ -2778,6 +2866,16 @@ function PublishFooter({
             >
               移除关联 · {batchUnlinkable}
             </Button>
+            <Button
+              tokens={tokens}
+              size="xs"
+              variant="danger"
+              disabled={busy || batchRemovable === 0}
+              onPress={onBatchRemove}
+              testID="shared-assets-batch-remove"
+            >
+              删除共享资产 · {batchRemovable}
+            </Button>
           </View>
           <Text
             style={{
@@ -2856,6 +2954,7 @@ function RelationshipView({
   onAssociate,
   onAssociateAll,
   onUnlink,
+  onRemoveShared,
   onDiff,
   onMerge,
   onDiscard,
@@ -2885,6 +2984,7 @@ function RelationshipView({
   onAssociate: (row: AssetRelationshipRow) => void;
   onAssociateAll: (rows: AssetRelationshipRow[]) => void;
   onUnlink: (row: AssetRelationshipRow) => void;
+  onRemoveShared: (row: AssetRelationshipRow) => void;
   onDiff: (row: AssetRelationshipRow) => void;
   onMerge: (row: AssetRelationshipRow) => void;
   onDiscard: (row: AssetRelationshipRow) => void;
@@ -3082,6 +3182,7 @@ function RelationshipView({
                   onEnable={() => onEnable(row)}
                   onAssociate={() => onAssociate(row)}
                   onUnlink={() => onUnlink(row)}
+                  onRemoveShared={() => onRemoveShared(row)}
                   onSelectForPublish={() => onSelectForPublish(row)}
                   onDiff={() => onDiff(row)}
                   onMerge={() => onMerge(row)}
@@ -3265,6 +3366,7 @@ function RelationshipRow({
   onEnable,
   onAssociate,
   onUnlink,
+  onRemoveShared,
   onSelectForPublish,
   onDiff,
   onMerge,
@@ -3282,6 +3384,7 @@ function RelationshipRow({
   onEnable: () => void;
   onAssociate: () => void;
   onUnlink: () => void;
+  onRemoveShared: () => void;
   onSelectForPublish: () => void;
   onDiff: () => void;
   onMerge: () => void;
@@ -3424,6 +3527,18 @@ function RelationshipRow({
           {shared.description || "无描述"}
         </Text>
         <SyncStatusPill status={syncStatus} tokens={tokens} />
+        <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+          <Button
+            tokens={tokens}
+            size="xs"
+            variant="danger"
+            onPress={onRemoveShared}
+            disabled={busy !== null}
+            testID={`shared-assets-remove-${shared.assetId}`}
+          >
+            删除共享资产
+          </Button>
+        </View>
       </View>
     </View>
   ) : (
@@ -4171,6 +4286,251 @@ function BatchUnlinkDialog({
             testID="shared-assets-batch-unlink-confirm"
           >
             保留本地并移除关联
+          </Button>
+        </View>
+      </View>
+    </Overlay>
+  );
+}
+
+function RemoveSharedAssetsDialog({
+  rows,
+  tokens,
+  busy,
+  expectedRevision,
+  onClose,
+  onConfirm,
+}: {
+  rows: AssetRelationshipRow[];
+  tokens: Tokens;
+  busy: boolean;
+  expectedRevision: string | null;
+  onClose: () => void;
+  onConfirm: (deleteLocal: boolean) => void;
+}) {
+  const [deleteLocal, setDeleteLocal] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const count = rows.length;
+  useEffect(() => {
+    if (count > 0) {
+      setDeleteLocal(false);
+      setConfirmed(false);
+    }
+  }, [count]);
+
+  const choice = (
+    selected: boolean,
+    title: string,
+    description: string,
+    onPress: () => void,
+    testID: string,
+  ) => (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      testID={testID}
+      style={{
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: tokens.spacing[2],
+        borderWidth: 1,
+        borderColor: selected ? tokens.colors.danger : tokens.colors.border,
+        backgroundColor: selected
+          ? "rgba(248, 81, 73, 0.07)"
+          : tokens.colors.surface2,
+        borderRadius: tokens.radius.md,
+        padding: tokens.spacing[3],
+      }}
+    >
+      <View
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: selected ? tokens.colors.danger : tokens.colors.border,
+          alignItems: "center",
+          justifyContent: "center",
+          marginTop: 2,
+        }}
+      >
+        {selected ? (
+          <View
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: tokens.colors.danger,
+            }}
+          />
+        ) : null}
+      </View>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text
+          style={{
+            color: tokens.colors.foreground,
+            fontSize: tokens.fontSize.sm,
+            fontWeight: tokens.fontWeight.semibold,
+          }}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            color: tokens.colors.foregroundMuted,
+            fontSize: tokens.fontSize.sm,
+          }}
+        >
+          {description}
+        </Text>
+      </View>
+    </Pressable>
+  );
+
+  return (
+    <Overlay open={count > 0} onClose={onClose} tokens={tokens} maxWidth={560}>
+      <View style={{ gap: tokens.spacing[4], padding: tokens.spacing[4] }}>
+        <DialogHeader
+          title="删除共享资产"
+          description={`将从共享仓库删除 ${count} 项资产，并创建一个本地 commit`}
+          tokens={tokens}
+          onClose={onClose}
+          closeDisabled={busy}
+        />
+        <ScrollView style={{ maxHeight: 220 }}>
+          <View style={{ gap: tokens.spacing[2] }}>
+            {rows.map((row) =>
+              row.shared ? (
+                <View
+                  key={row.id}
+                  style={{
+                    gap: 2,
+                    borderWidth: 1,
+                    borderColor: tokens.colors.border,
+                    borderRadius: tokens.radius.md,
+                    padding: tokens.spacing[2],
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: tokens.colors.foreground,
+                      fontSize: tokens.fontSize.sm,
+                      fontWeight: tokens.fontWeight.semibold,
+                    }}
+                  >
+                    {row.shared.name}
+                  </Text>
+                  <Mono tokens={tokens}>{row.shared.path}</Mono>
+                </View>
+              ) : null,
+            )}
+          </View>
+        </ScrollView>
+        <View style={{ gap: tokens.spacing[2] }}>
+          {choice(
+            !deleteLocal,
+            "保留本地（转为未发布）",
+            "共享仓库中的资产会删除，本地文件保留并转为本地资产。",
+            () => setDeleteLocal(false),
+            "shared-assets-remove-keep-local",
+          )}
+          {choice(
+            deleteLocal,
+            "一并删除本地",
+            "同时删除本地实体或文件，包含尚未发布的修改，此操作不可撤销。",
+            () => setDeleteLocal(true),
+            "shared-assets-remove-delete-local",
+          )}
+        </View>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: tokens.spacing[2],
+          }}
+        >
+          <Checkbox
+            tokens={tokens}
+            checked={confirmed}
+            onPress={() => setConfirmed((value) => !value)}
+            accessibilityLabel="我确认从共享仓库删除"
+          />
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: confirmed }}
+            onPress={() => setConfirmed((value) => !value)}
+            testID="shared-assets-remove-confirm-check"
+          >
+            <Text
+              style={{
+                color: tokens.colors.foreground,
+                fontSize: tokens.fontSize.sm,
+              }}
+            >
+              我确认从共享仓库删除
+            </Text>
+          </Pressable>
+        </View>
+        <View
+          style={{
+            gap: tokens.spacing[1],
+            borderWidth: 1,
+            borderColor: tokens.colors.border,
+            borderRadius: tokens.radius.md,
+            backgroundColor: tokens.colors.surface2,
+            padding: tokens.spacing[3],
+          }}
+        >
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            commit 信息
+          </Text>
+          <Mono tokens={tokens}>
+            {`chore(shared-assets): remove ${count} asset(s)`}
+          </Mono>
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            只创建本地 commit，不会自动 push。确认后请手动执行 git push。
+          </Text>
+          <Text
+            style={{
+              color: tokens.colors.foregroundMuted,
+              fontSize: tokens.fontSize.sm,
+            }}
+          >
+            当前 revision：
+            {expectedRevision ? expectedRevision.slice(0, 8) : "不可用"}
+          </Text>
+        </View>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            flexWrap: "wrap",
+            gap: tokens.spacing[2],
+          }}
+        >
+          <Button tokens={tokens} variant="ghost" onPress={onClose}>
+            取消
+          </Button>
+          <Button
+            tokens={tokens}
+            variant="destructive"
+            disabled={busy || !confirmed || !expectedRevision}
+            onPress={() => onConfirm(deleteLocal)}
+            testID="shared-assets-remove-confirm"
+          >
+            删除共享资产
           </Button>
         </View>
       </View>
