@@ -1,5 +1,5 @@
-import { lstat, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readFile, readlink, realpath, rm } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { PluginError } from "../shared/core/errors";
 import { unifiedDiff } from "../shared/core/diff";
 import type { IgnoreRule } from "../shared/core/ignore";
@@ -9,7 +9,11 @@ import {
   parseSkillAssetId,
   PROJECT_DIR,
 } from "../shared/core/paths";
-import { isProviderId, SKILL_ROOTS } from "../shared/core/providers";
+import {
+  isProviderId,
+  SKILL_ROOTS,
+  SUPPORTED_PROVIDERS,
+} from "../shared/core/providers";
 import type {
   AssetKind,
   AssetSummary,
@@ -17,10 +21,12 @@ import type {
   BatchPublishItemResult,
   BatchPublishPreview,
   BatchPublishResult,
+  ProviderId,
 } from "../shared/core/types";
 import { resolveState } from "./asset-state";
 import {
   atomicWriteFile,
+  directoryDigest,
   fileExists,
   readFileLimited,
   resolveInside,
@@ -31,6 +37,12 @@ import { isFileIgnored, isRuleIgnored, readSharedIgnoreRules } from "./ignore";
 import { repoDir } from "./plugin-data";
 import { resolveAsset, scanPrompt } from "./repo";
 import { validatePublishContent, validatePublishPath } from "./validation";
+import {
+  entityDigest,
+  providerSkillTarget,
+  skillEntityPath,
+} from "./skill-entity";
+import { finalizePublishedSkill } from "./skills";
 
 const PUSH_HINT =
   "Commit created locally. Push manually with git push; this plugin never pushes automatically.";
@@ -47,6 +59,84 @@ interface BatchInput {
   projectId: string;
   workspaceDirectory: string;
   items: BatchSelection[];
+}
+
+async function skillProjectionConflicts(input: {
+  workspaceDirectory: string;
+  name: string;
+  provider: ProviderId;
+  localRoot: string;
+  localDigest: string;
+}): Promise<
+  Array<{ provider: ProviderId | "entity"; targetPath: string; reason: string }>
+> {
+  const conflicts: Array<{
+    provider: ProviderId | "entity";
+    targetPath: string;
+    reason: string;
+  }> = [];
+  const entityPath = skillEntityPath(input.workspaceDirectory, input.name);
+  const entityExisting = await entityDigest(entityPath);
+  if (entityExisting !== null && entityExisting !== input.localDigest) {
+    conflicts.push({
+      provider: "entity",
+      targetPath: entityPath,
+      reason: "`.paseo/skills` already holds different content",
+    });
+  }
+  const localText = await readFile(
+    join(input.localRoot, "SKILL.md"),
+    "utf8",
+  ).catch(() => "");
+  for (const provider of SUPPORTED_PROVIDERS) {
+    if (provider === input.provider) continue;
+    const targetPath = providerSkillTarget(
+      input.workspaceDirectory,
+      provider,
+      input.name,
+    );
+    const info = await lstat(targetPath).catch(() => null);
+    if (!info) continue;
+    if (info.isSymbolicLink()) {
+      const link = await readlink(targetPath).catch(() => "");
+      const absolute = isAbsolute(link)
+        ? link
+        : resolve(dirname(targetPath), link);
+      const resolved = await realpath(absolute).catch(() => null);
+      const sourceReal = await realpath(input.localRoot).catch(() => null);
+      if (resolved !== null && resolved === sourceReal) continue;
+      conflicts.push({
+        provider,
+        targetPath,
+        reason: "existing symlink points elsewhere",
+      });
+      continue;
+    }
+    if (!info.isDirectory()) {
+      conflicts.push({
+        provider,
+        targetPath,
+        reason: "a file already exists at this path",
+      });
+      continue;
+    }
+    const digest = await entityDigest(targetPath);
+    if (digest === input.localDigest) continue;
+    const targetText = await readFile(
+      join(targetPath, "SKILL.md"),
+      "utf8",
+    ).catch(() => "");
+    conflicts.push({
+      provider,
+      targetPath,
+      reason: unifiedDiff(
+        `${provider}/skills/${input.name}/SKILL.md`,
+        targetText,
+        localText,
+      ),
+    });
+  }
+  return conflicts;
 }
 
 interface CreationFile {
@@ -221,6 +311,23 @@ async function creationPlan(input: {
       throw new PluginError(
         "E_VALIDATION_FAILED",
         `Skill has no files to publish: ${parsed.name}`,
+      );
+    }
+    const { digest: localDigest } = await directoryDigest(localRoot);
+    const conflicts = await skillProjectionConflicts({
+      workspaceDirectory: input.workspaceDirectory,
+      name: parsed.name,
+      provider,
+      localRoot,
+      localDigest,
+    });
+    if (conflicts.length > 0) {
+      throw new PluginError(
+        "E_VALIDATION_FAILED",
+        `Cannot publish ${parsed.name}: conflicting Skill projections (${conflicts
+          .map((entry) => entry.provider)
+          .join(", ")})`,
+        { conflicts },
       );
     }
     const asset = pseudoAsset({
@@ -647,6 +754,7 @@ export async function commitBatchPublish(
     ),
   );
   const publishableIds = new Set(publishable.map((item) => item.assetId));
+  let head: string | null = null;
   try {
     for (const selection of input.items) {
       if (selection.create) {
@@ -716,22 +824,7 @@ export async function commitBatchPublish(
         output: commit.stderr,
       });
     }
-    const head = await headRevision(checkout);
-    return {
-      commit: head,
-      pushed: false,
-      pushHint: PUSH_HINT,
-      published: publishable.map((item) => ({
-        assetId: item.assetId,
-        state: "published" as const,
-        targetPath: item.targetPath,
-        files: item.files.map((file) => file.repositoryPath),
-        reason: null,
-      })),
-      failed,
-      skipped,
-      rolledBack: false,
-    };
+    head = await headRevision(checkout);
   } catch (error) {
     await runGit(
       checkout,
@@ -753,4 +846,47 @@ export async function commitBatchPublish(
     }
     throw error;
   }
+
+  if (head === null) {
+    throw new PluginError("E_INTERNAL", "Git commit produced no revision");
+  }
+  for (const selection of input.items) {
+    if (!selection.create || selection.kind !== "skill") continue;
+    if (!publishableIds.has(selection.assetId)) continue;
+    const parsed = parseSkillAssetId(selection.assetId);
+    if (!parsed) continue;
+    const provider = (selection.provider ?? "codex") as ProviderId;
+    try {
+      await finalizePublishedSkill({
+        projectId: input.projectId,
+        workspaceDirectory: input.workspaceDirectory,
+        assetId: selection.assetId,
+        name: parsed.name,
+        provider,
+      });
+    } catch (error) {
+      throw new PluginError(
+        error instanceof PluginError ? error.code : "E_INTERNAL",
+        `Published ${selection.assetId} at ${head}, but moving the local Skill projection failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { commit: head },
+      );
+    }
+  }
+  return {
+    commit: head,
+    pushed: false,
+    pushHint: PUSH_HINT,
+    published: publishable.map((item) => ({
+      assetId: item.assetId,
+      state: "published" as const,
+      targetPath: item.targetPath,
+      files: item.files.map((file) => file.repositoryPath),
+      reason: null,
+    })),
+    failed,
+    skipped,
+    rolledBack: false,
+  };
 }

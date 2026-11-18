@@ -32,7 +32,24 @@ export interface Binding {
   state: BindingState;
 }
 
-export interface SkillProjection {
+/**
+ * One shared Skill entity under `<workspace>/.paseo/skills/<name>`. Providers
+ * only carry a projection (symlink, or a copy when symlinks are unavailable).
+ */
+export interface SkillEntityProjection {
+  assetId: string;
+  name: string;
+  entityPath: string;
+  providers: ProviderId[];
+  mode: SkillProjectionMode;
+  digest: string;
+  updatedAt: string;
+}
+
+export type SkillProjectionMode = "symlink" | "copy";
+
+/** Read-only shape written by shared-assets <= 0.5.0. Never written again. */
+export interface LegacySkillProjection {
   assetId: string;
   name: string;
   provider: ProviderId;
@@ -62,7 +79,8 @@ export interface CanonicalInstruction {
 export interface PluginConfig {
   version: 1;
   bindings: Record<string, Binding>;
-  skills: Record<string, SkillProjection[]>;
+  /** One entity per shared Skill; legacy per-provider records stay readable. */
+  skills: Record<string, Array<SkillEntityProjection | LegacySkillProjection>>;
   instructions: Record<
     string,
     {
@@ -141,11 +159,26 @@ export interface SkillProjectionStatus {
   provider: ProviderId;
   targetPath: string;
   state: ProjectionState;
+  mode: SkillProjectionMode;
+}
+
+export interface SkillEntityStatus {
+  assetId: string;
+  name: string;
+  entityPath: string;
+  digest: string | null;
+  baselineDigest: string | null;
+  state: ProjectionState;
+  providers: ProviderId[];
+  mode: SkillProjectionMode;
+  legacy: boolean;
 }
 
 export interface SkillListResult {
   skills: AssetSummary[];
   projections: SkillProjectionStatus[];
+  entities: SkillEntityStatus[];
+  migrationRequired: boolean;
   warnings: string[];
 }
 
@@ -228,6 +261,8 @@ export interface DriftItem {
   status: DriftStatus;
   files: DriftFileStatus[];
   ignored: boolean;
+  /** Provider projections for an entity-backed Skill; absent for other kinds. */
+  projections?: SkillProjectionStatus[];
 }
 
 export interface AssetDiffResult {

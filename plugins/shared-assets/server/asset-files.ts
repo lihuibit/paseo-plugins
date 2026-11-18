@@ -15,6 +15,7 @@ import { resolveAsset, scanAllAssets } from "./repo";
 import { scanFiles, fileExists } from "./fs-utils";
 import { isFileIgnored, readSharedIgnoreRules } from "./ignore";
 import type { IgnoreRule } from "../shared/core/ignore";
+import { splitSkillRecords } from "./skill-entity";
 
 export interface LocalAssetFile {
   relativePath: string;
@@ -64,7 +65,10 @@ async function defaultSkillProvider(
 ): Promise<ProviderId> {
   const config = await readConfig();
   const records = config.skills[projectId] ?? [];
-  const match = records.find(
+  const { entities, legacy } = splitSkillRecords(records);
+  const entity = entities.find((entry) => entry.assetId === assetId);
+  if (entity?.providers.length) return entity.providers[0] as ProviderId;
+  const match = legacy.find(
     (entry) =>
       entry.assetId === assetId &&
       entry.targetPath.startsWith(workspaceDirectory),
@@ -139,7 +143,14 @@ export async function resolveAssetForWorkspace(input: {
         `Provider ${selected} has no verified skill directory`,
       );
     }
-    localRoot = join(input.workspaceDirectory, skillRoot, parsed.name);
+    const config = await readConfig();
+    const { entities } = splitSkillRecords(
+      config.skills[input.projectId] ?? [],
+    );
+    const entity = entities.find((entry) => entry.assetId === asset.assetId);
+    localRoot =
+      entity?.entityPath ??
+      join(input.workspaceDirectory, skillRoot, parsed.name);
     repositoryRoot = join(checkout, "skills", parsed.scope, parsed.name);
     return {
       asset,

@@ -1226,6 +1226,7 @@ function ProjectDetail({
       ) as {
         errors: Array<{ provider: string; message: string }>;
         kept: Array<{ targetPath: string; reason: string }>;
+        projections?: Array<{ mode: "symlink" | "copy" }>;
       };
       if (result.errors.length > 0) {
         setError(result.errors.map((entry) => entry.message).join("；"));
@@ -1234,8 +1235,10 @@ function ProjectDetail({
         result.kept.length > 0
           ? `已保留本地内容：${result.kept.map((entry) => entry.targetPath).join("，")}`
           : enabled
-            ? "已添加到本地"
-            : "已移除本地关联",
+            ? result.projections?.some((entry) => entry.mode === "copy")
+              ? "已复制（当前平台不支持软链）"
+              : "已创建软链"
+            : "已移除该 Provider 的软链",
       );
     } else if (row.shared?.kind === "prompt") {
       const result = unwrap(
@@ -1267,7 +1270,7 @@ function ProjectDetail({
   ) => {
     if (!workspaceId || !row.shared || !row.local) return;
     await run("adopt", async () => {
-      unwrap(
+      const adopted = unwrap(
         await relationshipsAdoptCall({
           projectId: project.projectId,
           workspaceId,
@@ -1277,12 +1280,14 @@ function ProjectDetail({
           localAssetId: row.local!.assetId,
           mode,
         }),
-      );
+      ) as { projections?: Array<{ mode: "symlink" | "copy" }> };
       setAssociation(null);
       setNotice(
-        mode === "preserve-local"
-          ? `${row.shared!.name} 已关联，保留本地版本`
-          : `${row.shared!.name} 已关联并使用共享版本`,
+        adopted.projections?.some((entry) => entry.mode === "copy")
+          ? `${row.shared!.name} 已复制（当前平台不支持软链）`
+          : mode === "preserve-local"
+            ? `${row.shared!.name} 已关联，保留本地版本`
+            : `${row.shared!.name} 已关联并使用共享版本`,
       );
     });
   };
@@ -1660,6 +1665,16 @@ function ProjectDetail({
         ) : null}
         {notice ? (
           <Alert tone="success" title={notice} tokens={tokens} />
+        ) : null}
+        {relationships?.warnings.some((warning) =>
+          warning.includes("旧版 Skill 投影"),
+        ) ? (
+          <Alert
+            tone="warning"
+            title="检测到旧版 Skill 投影"
+            description="检测到旧版 Skill 投影，需要运行迁移脚本。当前只读兼容，不会自动改写文件。"
+            tokens={tokens}
+          />
         ) : null}
 
         {compact ? null : (

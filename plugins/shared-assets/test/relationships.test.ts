@@ -148,11 +148,12 @@ describe("association lifecycle", () => {
       assetId: "skill:project/review",
       deleteLocal: false,
     });
-    expect(unlinked.deleted).toEqual([]);
-    expect(unlinked.kept).toHaveLength(1);
-    expect(existsSync(join(workspace, ".codex/skills/review/SKILL.md"))).toBe(
-      true,
-    );
+    expect(unlinked.deleted).toEqual([join(workspace, ".codex/skills/review")]);
+    expect(unlinked.kept).toEqual([join(workspace, ".paseo/skills/review")]);
+    expect(existsSync(join(workspace, ".codex/skills/review"))).toBe(false);
+    expect(
+      await readFile(join(workspace, ".paseo/skills/review/SKILL.md"), "utf8"),
+    ).toBe(localSkill);
   });
 
   it("keeps a linked row visible when the shared asset was deleted", async () => {
@@ -208,8 +209,9 @@ describe("association lifecycle", () => {
       assetId: "skill:project/review",
       deleteLocal: true,
     });
-    expect(result.deleted).toHaveLength(1);
+    expect(result.deleted).toHaveLength(2);
     expect(existsSync(join(workspace, ".codex/skills/review"))).toBe(false);
+    expect(existsSync(join(workspace, ".paseo/skills/review"))).toBe(false);
   });
 
   it("adopts knowledge and docs with both modes", async () => {

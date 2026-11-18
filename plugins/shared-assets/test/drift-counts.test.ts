@@ -84,7 +84,7 @@ describe("drift tab counts", () => {
     expect(counts.byProvider.get("codex") ?? 0).toBe(0);
   });
 
-  it("counts one local edit under the affected provider only", async () => {
+  it("counts an entity edit under every provider that links it", async () => {
     const name = skillName(1);
     await writeFile(
       await localSkill("claude", name),
@@ -93,11 +93,11 @@ describe("drift tab counts", () => {
     const drift = await listDrift("p1", workspace);
     expect(drift).toHaveLength(1);
     expect(drift[0]?.status).toBe("local-update");
-    expect(drift[0]?.provider).toBe("claude");
+    expect(drift[0]?.provider).toBeNull();
     const counts = countDrift(drift, "skill");
     expect(counts.byKind.get("skill")).toBe(1);
     expect(counts.byProvider.get("claude")).toBe(1);
-    expect(counts.byProvider.get("codex") ?? 0).toBe(0);
+    expect(counts.byProvider.get("codex")).toBe(1);
   });
 
   it("still counts diverged and remote-deleted skills", async () => {
@@ -111,13 +111,9 @@ describe("drift tab counts", () => {
       `${skillMarkdown(name)}\nremote edit\n`,
     );
     let drift = await listDrift("p1", workspace);
-    expect(drift.find((item) => item.provider === "codex")?.status).toBe(
-      "diverged",
-    );
-    expect(drift.find((item) => item.provider === "claude")?.status).toBe(
-      "remote-update",
-    );
-    expect(countDrift(drift, "skill").byKind.get("skill")).toBe(2);
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.status).toBe("diverged");
+    expect(countDrift(drift, "skill").byKind.get("skill")).toBe(1);
 
     await writeFile(await localSkill("codex", name), skillMarkdown(name));
     await rm(join(checkout, "skills", "project", name), {
@@ -125,13 +121,9 @@ describe("drift tab counts", () => {
       force: true,
     });
     drift = await listDrift("p1", workspace);
-    expect(drift.find((item) => item.provider === "codex")?.status).toBe(
-      "remote-deleted",
-    );
-    expect(drift.find((item) => item.provider === "claude")?.status).toBe(
-      "remote-deleted",
-    );
-    expect(countDrift(drift, "skill").byKind.get("skill")).toBe(2);
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.status).toBe("remote-deleted");
+    expect(countDrift(drift, "skill").byKind.get("skill")).toBe(1);
   });
 
   it("still counts assets that were never published", async () => {
@@ -163,9 +155,9 @@ describe("drift tab counts", () => {
       },
     ]);
     const all = await listDrift("p1", workspace, true);
-    expect(all.find((item) => item.provider === "claude")?.ignored).toBe(true);
+    expect(all.find((item) => item.provider === null)?.ignored).toBe(true);
     const visible = await listDrift("p1", workspace, false);
-    expect(visible.find((item) => item.provider === "claude")).toBeUndefined();
+    expect(visible.find((item) => item.provider === null)).toBeUndefined();
     const counts = countDrift(all, "skill");
     expect(counts.byKind.get("skill") ?? 0).toBe(0);
     expect(counts.byProvider.get("claude") ?? 0).toBe(0);

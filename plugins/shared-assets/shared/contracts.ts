@@ -131,11 +131,26 @@ export const SkillProjectionStatusSchema = z.object({
   provider: z.string().min(1),
   targetPath: z.string().min(1),
   state: z.enum(["managed", "missing", "modified"]),
+  mode: z.enum(["symlink", "copy"]),
+});
+
+export const SkillEntityStatusSchema = z.object({
+  assetId: z.string().min(1),
+  name: z.string().min(1),
+  entityPath: z.string().min(1),
+  digest: z.string().nullable(),
+  baselineDigest: z.string().nullable(),
+  state: z.enum(["managed", "missing", "modified"]),
+  providers: z.array(z.string().min(1)),
+  mode: z.enum(["symlink", "copy"]),
+  legacy: z.boolean(),
 });
 
 export const SkillListResultSchema = z.object({
   skills: z.array(AssetSummarySchema),
   projections: z.array(SkillProjectionStatusSchema),
+  entities: z.array(SkillEntityStatusSchema),
+  migrationRequired: z.boolean(),
   warnings: z.array(z.string()),
 });
 
@@ -407,6 +422,7 @@ export const DriftItemSchema = z.object({
   status: DriftStatusSchema,
   files: z.array(DriftFileStatusSchema),
   ignored: z.boolean(),
+  projections: z.array(SkillProjectionStatusSchema).optional(),
 });
 
 export const driftListRpc = defineRpc({
@@ -508,6 +524,7 @@ export const relationshipsAdoptRpc = defineRpc({
     z.object({
       assetId: z.string().min(1),
       mode: z.enum(["preserve-local", "use-remote"]),
+      projections: z.array(SkillProjectionStatusSchema).optional(),
     }),
   ),
 });

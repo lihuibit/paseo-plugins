@@ -90,12 +90,10 @@ describe("credential files", () => {
     }
 
     const drift = await listDrift("p1", workspace);
-    expect(
-      drift.map((item) => `${item.assetId}/${item.provider}`).sort(),
-    ).toEqual([
-      "skill:project/tse-alarm-analysis/claude",
-      "skill:project/tse-alarm-analysis/codex",
+    expect(drift.map((item) => item.assetId)).toEqual([
+      "skill:project/tse-alarm-analysis",
     ]);
+    expect(drift[0]?.provider).toBeNull();
     expect(drift.every((item) => item.status === "local-update")).toBe(true);
     expect(
       drift.flatMap((item) => item.files.map((file) => file.path)),
@@ -111,9 +109,7 @@ describe("credential files", () => {
 
     const drift = await listDrift("p1", workspace);
     const item = drift.find(
-      (entry) =>
-        entry.assetId === "skill:project/sonic-cli" &&
-        entry.provider === "claude",
+      (entry) => entry.assetId === "skill:project/sonic-cli",
     );
     expect(item?.status).toBe("unpublished-local");
     expect(
@@ -129,15 +125,12 @@ describe("credential files", () => {
       assetId: "skill:project/sonic-cli",
       provider: "claude",
     });
-    expect(discarded.removedFiles).toEqual([join(root, "notes.txt")]);
-    expect(existsSync(join(root, "notes.txt"))).toBe(false);
+    const entity = join(workspace, ".paseo/skills/sonic-cli");
+    expect(discarded.removedFiles).toEqual([join(entity, "notes.txt")]);
+    expect(existsSync(join(entity, "notes.txt"))).toBe(false);
     expect(
       await listDrift("p1", workspace).then((items) =>
-        items.find(
-          (entry) =>
-            entry.assetId === "skill:project/sonic-cli" &&
-            entry.provider === "claude",
-        ),
+        items.find((entry) => entry.assetId === "skill:project/sonic-cli"),
       ),
     ).toBeUndefined();
   });

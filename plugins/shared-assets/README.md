@@ -1,6 +1,6 @@
 # Shared Assets (Paseo plugin)
 
-版本：`0.5.0`。plugin id 为 `paseo-shared-assets`；项目内本地目录统一使用
+版本：`0.6.0`。plugin id 为 `paseo-shared-assets`；项目内本地目录统一使用
 `.paseo/`。
 
 团队 Git 仓库中的 Skill、`AGENTS.md`、Knowledge 和 Doc 的项目级投影。

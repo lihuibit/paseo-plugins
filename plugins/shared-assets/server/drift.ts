@@ -28,6 +28,12 @@ import type { IgnoreRule } from "../shared/core/ignore";
 import { readConfig } from "./registry";
 import { repoDir } from "./plugin-data";
 import { scanAllAssets } from "./repo";
+import {
+  LEGACY_SKILL_MESSAGE,
+  entityDigest,
+  projectionStatuses,
+  splitSkillRecords,
+} from "./skill-entity";
 
 const STATUS_ORDER: DriftStatus[] = [
   "diverged",
@@ -360,14 +366,18 @@ async function skillItems(
   rules: IgnoreRule[],
 ): Promise<Array<Omit<DriftItem, "ignored">>> {
   const config = await readConfig();
-  const records = (config.skills[projectId] ?? []).filter((record) =>
-    record.targetPath.startsWith(workspaceDirectory),
+  const { entities, legacy } = splitSkillRecords(
+    config.skills[projectId] ?? [],
   );
+  if (legacy.length > 0) {
+    console.warn(`[paseo-shared-assets] ${LEGACY_SKILL_MESSAGE}`);
+  }
   const groups = new Map<
     string,
     { assetId: string; provider: ProviderId; targetPath: string }
   >();
-  for (const record of records) {
+  for (const record of legacy) {
+    if (!record.targetPath.startsWith(workspaceDirectory)) continue;
     groups.set(`${record.assetId}\u0000${record.provider}`, {
       assetId: record.assetId,
       provider: record.provider,
@@ -391,6 +401,66 @@ async function skillItems(
 
   const assetsById = remoteAssetMap(assets);
   const items: Array<Omit<DriftItem, "ignored">> = [];
+
+  for (const record of entities.sort((a, b) =>
+    a.assetId.localeCompare(b.assetId),
+  )) {
+    const parsed = parseSkillAssetId(record.assetId);
+    if (!parsed) continue;
+    const assetPath = `skills/${parsed.scope}/${parsed.name}`;
+    const repositoryRoot = join(checkout, "skills", parsed.scope, parsed.name);
+    const assetRef = {
+      assetId: record.assetId,
+      kind: "skill" as const,
+      path: assetPath,
+    };
+    const relatives = [
+      ...new Set([
+        ...(await relativeFiles(repositoryRoot, assetRef, rules)),
+        ...(await relativeFiles(record.entityPath, assetRef, rules)),
+      ]),
+    ].sort();
+    const files = await buildFileStatuses(
+      relatives.map((entry) => ({
+        relativePath: entry,
+        repositoryPath: `${assetPath}/${entry}`,
+        localPath: join(record.entityPath, entry),
+        remotePath: join(repositoryRoot, entry),
+      })),
+      baselines,
+      record.assetId,
+      null,
+    );
+    const projections = await projectionStatuses({
+      assetId: record.assetId,
+      name: record.name,
+      workspaceDirectory,
+      entityPath: record.entityPath,
+      entityDigest: await entityDigest(record.entityPath),
+      providers: record.providers,
+    });
+    const base = item(
+      {
+        assetId: record.assetId,
+        kind: "skill",
+        name: record.name,
+        scope: parsed.scope,
+        provider: null,
+        targetPath: record.entityPath,
+      },
+      files,
+    );
+    if (base.status === "synced") {
+      if (projections.some((entry) => entry.state === "missing")) {
+        base.status = "missing";
+      } else if (projections.some((entry) => entry.state === "modified")) {
+        base.status = "diverged";
+      }
+    }
+    items.push({ ...base, projections });
+  }
+
+  // Legacy projections stay readable exactly as they were written.
   for (const group of [...groups.values()].sort((a, b) =>
     `${a.assetId}/${a.provider}`.localeCompare(`${b.assetId}/${b.provider}`),
   )) {

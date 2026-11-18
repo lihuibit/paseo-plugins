@@ -4,7 +4,7 @@ Paseo 插件 monorepo。
 
 | 组件              | 版本    |
 | ----------------- | ------- |
-| `shared-assets`   | `0.5.0` |
+| `shared-assets`   | `0.6.0` |
 | `task-board`      | `0.4.0` |
 | `paseo-board` CLI | `0.2.0` |
 
@@ -110,6 +110,16 @@ paseo plugin reload paseo-task-board --home ~/.paseo-dev
 - 看板 Agent 的 `board_declare` 需要 `daemon.mcp.injectIntoAgents: true`；未开启时
   看板顶部显示黄色横幅，状态只能由 hooks 推断。
 - 两个插件的数据都在 `$PASEO_HOME/plugin-data/<plugin-id>/`，插件不写其他 home。
+
+### 0.6.0（shared-assets，breaking）
+
+Skill 投影改为单一实体 + Provider 软链：
+
+- 已发布或已关联的 Skill 唯一实体存放在 `.paseo/skills/<name>/`，provider 目录为
+  相对软链；`symlink` 不可用时回退为复制。
+- `config.skills` 按 assetId 一条记录，含 `providers`、`mode`、实体路径和 digest；
+  旧的多 provider 记录只读兼容，不自动改写。
+- 检测到旧版 Skill 投影时，日志和 UI 提示「检测到旧版 Skill 投影，需要运行迁移脚本」。
 
 ### 0.5.0 / 0.4.0
 

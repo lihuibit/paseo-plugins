@@ -23,8 +23,19 @@ export function countDrift(
   for (const item of items) {
     if (item.ignored) continue;
     byKind.set(item.kind, (byKind.get(item.kind) ?? 0) + 1);
-    if (item.kind !== kind || !item.provider) continue;
-    byProvider.set(item.provider, (byProvider.get(item.provider) ?? 0) + 1);
+    if (item.kind !== kind) continue;
+    if (item.provider) {
+      byProvider.set(item.provider, (byProvider.get(item.provider) ?? 0) + 1);
+      continue;
+    }
+    // Entity-backed Skills are computed once, so advertise the same work on
+    // every provider tab that still projects the entity.
+    for (const projection of item.projections ?? []) {
+      byProvider.set(
+        projection.provider,
+        (byProvider.get(projection.provider) ?? 0) + 1,
+      );
+    }
   }
   return { byKind, byProvider };
 }

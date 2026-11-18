@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, rm } from "node:fs/promises";
+import { lstat, readdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PluginError } from "../shared/core/errors";
 import {
@@ -18,7 +18,7 @@ import type {
   LocalAssetSummary,
   ProviderId,
   RelationshipListResult,
-  SkillProjection,
+  SkillProjectionStatus,
   UnlinkResult,
 } from "../shared/core/types";
 import {
@@ -51,6 +51,18 @@ import {
   scanPrompt,
 } from "./repo";
 import { listDrift } from "./drift";
+import {
+  LEGACY_SKILL_MESSAGE,
+  entityDigest,
+  ensureSkillEntity,
+  moveSkillEntity,
+  providerSkillTarget,
+  projectSkillToProvider,
+  projectionStatuses,
+  removeSkillProjection,
+  skillEntityPath,
+  splitSkillRecords,
+} from "./skill-entity";
 
 async function localFileSummary(
   assetId: string,
@@ -110,6 +122,26 @@ async function localSkills(
     );
   }
   return skills;
+}
+
+async function entityLocalSkill(input: {
+  workspaceDirectory: string;
+  name: string;
+  provider: ProviderId;
+}): Promise<LocalAssetSummary | null> {
+  const path = skillEntityPath(input.workspaceDirectory, input.name);
+  const skillFile = join(path, "SKILL.md");
+  if (!(await fileExists(skillFile))) return null;
+  const markdown = await readFile(skillFile, "utf8").catch(() => "");
+  const frontmatter = parseSkillFrontmatter(markdown);
+  return await localFileSummary(
+    `local-skill:entity/${input.name}`,
+    "skill",
+    input.name,
+    input.provider,
+    path,
+    frontmatter.description,
+  );
 }
 
 async function localPrompt(
@@ -275,25 +307,68 @@ export async function listRelationships(input: {
   if (input.kind === "skill") {
     const provider = input.provider ?? "codex";
     const sharedSkills = sharedForKind(assets, "skill");
-    const locals = await localSkills(input.workspaceDirectory, provider);
-    const records = (config.skills[input.projectId] ?? []).filter(
-      (record) => record.provider === provider,
-    );
-    const tombstones = records
-      .filter(
-        (record) =>
-          !sharedSkills.some((asset) => asset.assetId === record.assetId),
-      )
-      .map((record) => {
-        const local = locals.find((asset) => asset.name === record.name);
-        return tombstoneAsset({
-          assetId: record.assetId,
-          kind: "skill",
-          name: record.name,
-          path: `skills/project/${record.name}`,
-          description: local?.description ?? null,
-        });
-      });
+    const records = config.skills[input.projectId] ?? [];
+    const { entities, legacy } = splitSkillRecords(records);
+    const managedTargets = new Set<string>();
+    for (const record of entities) {
+      for (const entry of record.providers) {
+        if (entry !== provider) continue;
+        try {
+          managedTargets.add(
+            providerSkillTarget(
+              input.workspaceDirectory,
+              provider,
+              record.name,
+            ),
+          );
+        } catch {
+          // Provider without a skill root: nothing to project.
+        }
+      }
+    }
+    for (const record of legacy) {
+      if (record.provider === provider) managedTargets.add(record.targetPath);
+    }
+    const locals = (
+      await localSkills(input.workspaceDirectory, provider)
+    ).filter((asset) => !managedTargets.has(asset.path));
+    if (legacy.length > 0) warnings.push(LEGACY_SKILL_MESSAGE);
+    const tombstones = [
+      ...entities
+        .filter(
+          (record) =>
+            record.providers.includes(provider) &&
+            !sharedSkills.some((asset) => asset.assetId === record.assetId),
+        )
+        .map((record) =>
+          tombstoneAsset({
+            assetId: record.assetId,
+            kind: "skill",
+            name: record.name,
+            path: `skills/project/${record.name}`,
+            description:
+              locals.find((asset) => asset.name === record.name)?.description ??
+              null,
+          }),
+        ),
+      ...legacy
+        .filter(
+          (record) =>
+            record.provider === provider &&
+            !sharedSkills.some((asset) => asset.assetId === record.assetId),
+        )
+        .map((record) =>
+          tombstoneAsset({
+            assetId: record.assetId,
+            kind: "skill",
+            name: record.name,
+            path: `skills/project/${record.name}`,
+            description:
+              locals.find((asset) => asset.name === record.name)?.description ??
+              null,
+          }),
+        ),
+    ];
     const pool = [...sharedSkills, ...tombstones];
     const names = [
       ...new Set([
@@ -303,32 +378,38 @@ export async function listRelationships(input: {
     ].sort();
     for (const name of names) {
       const shared = pool.find((asset) => asset.name === name) ?? null;
-      const local = locals.find((asset) => asset.name === name) ?? null;
-      const record = shared
-        ? records.find(
+      const providerLocal = locals.find((asset) => asset.name === name) ?? null;
+      const entity =
+        shared && entities.find((entry) => entry.assetId === shared.assetId);
+      const linked = shared
+        ? (entity?.providers.includes(provider) ?? false) ||
+          legacy.some(
             (entry) =>
-              entry.assetId === shared.assetId &&
-              entry.provider === provider &&
-              entry.targetPath.startsWith(input.workspaceDirectory),
+              entry.assetId === shared.assetId && entry.provider === provider,
           )
-        : undefined;
-      const occupied =
-        shared && local
-          ? records.find(
-              (entry) =>
-                entry.provider === provider &&
-                entry.targetPath === local.path &&
-                entry.assetId !== shared.assetId,
-            )
-          : undefined;
+        : false;
+      const entityLocal = linked
+        ? await entityLocalSkill({
+            workspaceDirectory: input.workspaceDirectory,
+            name,
+            provider,
+          })
+        : null;
+      const local = entityLocal ?? providerLocal;
+      const targetPath = shared
+        ? providerSkillTarget(input.workspaceDirectory, provider, name)
+        : null;
+      const conflict = linked && providerLocal?.path === targetPath;
       rows.push(
         rowFor({
           shared,
           local,
-          linked: record !== undefined,
-          conflict: occupied !== undefined,
+          linked,
+          conflict,
           drift: shared
-            ? (driftItems.get(driftKey(shared.assetId, provider)) ?? null)
+            ? (driftItems.get(driftKey(shared.assetId, null)) ??
+              driftItems.get(driftKey(shared.assetId, provider)) ??
+              null)
             : null,
         }),
       );
@@ -553,17 +634,24 @@ export async function readLocalAsset(input: {
     localRoot = join(workspace, PROJECT_DIR, "docs", name);
     relativePath = input.path ?? (await firstFile(localRoot));
   } else {
-    const match = /^local-skill:([^/]+)\/([^/]+)$/.exec(input.localAssetId);
-    const provider = (input.provider ?? match?.[1] ?? "codex") as ProviderId;
-    const name = match?.[2];
-    const skillRoot = SKILL_ROOTS[provider];
-    if (!name || !skillRoot) {
-      throw new PluginError(
-        "E_ASSET_NOT_FOUND",
-        `Unknown local Skill asset: ${input.localAssetId}`,
-      );
+    const entityMatch = /^local-skill:entity\/([^/]+)$/.exec(
+      input.localAssetId,
+    );
+    if (entityMatch) {
+      localRoot = skillEntityPath(workspace, entityMatch[1] as string);
+    } else {
+      const match = /^local-skill:([^/]+)\/([^/]+)$/.exec(input.localAssetId);
+      const provider = (input.provider ?? match?.[1] ?? "codex") as ProviderId;
+      const name = match?.[2];
+      const skillRoot = SKILL_ROOTS[provider];
+      if (!name || !skillRoot) {
+        throw new PluginError(
+          "E_ASSET_NOT_FOUND",
+          `Unknown local Skill asset: ${input.localAssetId}`,
+        );
+      }
+      localRoot = join(workspace, skillRoot, name);
     }
-    localRoot = join(workspace, skillRoot, name);
     relativePath = input.path ?? (await firstFile(localRoot));
   }
 
@@ -593,7 +681,11 @@ export async function adoptRelationship(input: {
   assetId: string;
   localAssetId: string;
   mode: "preserve-local" | "use-remote";
-}): Promise<{ assetId: string; mode: "preserve-local" | "use-remote" }> {
+}): Promise<{
+  assetId: string;
+  mode: "preserve-local" | "use-remote";
+  projections?: SkillProjectionStatus[];
+}> {
   const listing = await listRelationships({
     projectId: input.projectId,
     workspaceDirectory: input.workspaceDirectory,
@@ -629,47 +721,118 @@ export async function adoptRelationship(input: {
 
   const checkout = repoDir(input.projectId);
   const sharedPath = join(checkout, row.shared.path);
+  let projections: SkillProjectionStatus[] | undefined;
 
   if (input.kind === "skill") {
     const provider = input.provider ?? "codex";
-    if (input.mode === "use-remote") {
-      await copySharedToLocal(row.shared, checkout, row.local);
-    }
-    const digest = (await directoryDigest(sharedPath)).digest;
     const config = await readConfig();
     const records = (config.skills[input.projectId] ??= []);
-    const conflicting = records.find(
+    const { entities, legacy } = splitSkillRecords(records);
+    if (
+      legacy.some(
+        (entry) =>
+          entry.provider === provider || entry.assetId === input.assetId,
+      )
+    ) {
+      throw new PluginError("E_VALIDATION_FAILED", LEGACY_SKILL_MESSAGE);
+    }
+    const existing = entities.find(
       (entry) =>
-        (entry.assetId === input.assetId && entry.provider === provider) ||
-        (entry.targetPath === row.local!.path && entry.provider === provider),
+        entry.assetId === input.assetId || entry.entityPath === row.local!.path,
     );
-    if (conflicting) {
+    if (existing && existing.assetId !== input.assetId) {
       throw new PluginError(
         "E_VALIDATION_FAILED",
         "This local or shared Skill is already associated",
       );
     }
-    const projection: SkillProjection = {
+    const entityPath = skillEntityPath(
+      input.workspaceDirectory,
+      row.shared.name,
+    );
+    const localDigest = (await directoryDigest(row.local.path)).digest;
+    const sharedDigest = (await directoryDigest(sharedPath)).digest;
+    let rollback: (() => Promise<void>) | null = null;
+    let displacedLocal: string | null = null;
+    if (input.mode === "preserve-local") {
+      const existingDigest = await entityDigest(entityPath);
+      if (existingDigest === null) {
+        const moved = await moveSkillEntity({
+          sourcePath: row.local.path,
+          entityPath,
+          expectedDigest: localDigest,
+        });
+        rollback = moved.rollback;
+      } else if (existingDigest === localDigest) {
+        await rm(row.local.path, { recursive: true, force: true });
+      } else {
+        throw new PluginError(
+          "E_VALIDATION_FAILED",
+          `${entityPath} already exists with different content`,
+        );
+      }
+    } else {
+      await ensureSkillEntity({ sharedPath, entityPath });
+      // `use-remote` is an explicit choice to discard the local copy.
+      if (localDigest !== sharedDigest) {
+        displacedLocal = `${row.local.path}.tmp-${process.pid}-${Date.now()}`;
+        await rename(row.local.path, displacedLocal);
+      }
+    }
+    const digest = (await entityDigest(entityPath)) ?? sharedDigest;
+    let projected;
+    try {
+      projected = await projectSkillToProvider({
+        workspaceDirectory: input.workspaceDirectory,
+        provider,
+        name: row.shared.name,
+        entityPath,
+        entityDigest: digest,
+      });
+    } catch (error) {
+      if (displacedLocal) {
+        await rename(displacedLocal, row.local.path).catch(() => {});
+      }
+      if (rollback) await rollback().catch(() => {});
+      throw error;
+    }
+    if (displacedLocal) {
+      await rm(displacedLocal, { recursive: true, force: true });
+    }
+    const providers = [
+      ...new Set([...(existing?.providers ?? []), projected.provider]),
+    ].sort() as ProviderId[];
+    const entity = {
       assetId: input.assetId,
       name: row.shared.name,
-      provider,
-      targetPath: row.local.path,
-      baselineDigest: digest,
+      entityPath,
+      providers,
+      mode: projected.mode,
+      digest,
       updatedAt: new Date().toISOString(),
     };
-    records.push(projection);
+    const index = records.findIndex((entry) => entry.assetId === input.assetId);
+    if (index >= 0) records[index] = entity;
+    else records.push(entity);
     await writeConfig(config);
-    const files = await scanFiles(sharedPath);
-    for (const file of files) {
+    for (const file of await scanFiles(sharedPath)) {
       await recordSharedBaseline({
         workspaceDirectory: input.workspaceDirectory,
         assetId: input.assetId,
         kind: "skill",
-        provider,
+        provider: null,
         relativePath: file.path,
         sharedPath: join(sharedPath, file.path),
       });
     }
+    projections = await projectionStatuses({
+      assetId: input.assetId,
+      name: row.shared.name,
+      workspaceDirectory: input.workspaceDirectory,
+      entityPath,
+      entityDigest: digest,
+      providers,
+    });
   } else if (input.kind === "prompt") {
     await adoptInstructions({
       projectId: input.projectId,
@@ -705,7 +868,7 @@ export async function adoptRelationship(input: {
       });
     }
   }
-  return { assetId: input.assetId, mode: input.mode };
+  return { assetId: input.assetId, mode: input.mode, projections };
 }
 
 async function removeLocalPath(
@@ -742,22 +905,67 @@ export async function unlinkRelationship(input: {
   const config = await readConfig();
 
   if (input.kind === "skill") {
-    const records = (config.skills[input.projectId] ?? []).filter(
+    const records = config.skills[input.projectId] ?? [];
+    const { entities, legacy } = splitSkillRecords(records);
+    const entity = entities.find((entry) => entry.assetId === input.assetId);
+    const legacyMatches = legacy.filter(
       (entry) =>
         entry.assetId === input.assetId &&
         (input.provider === null || entry.provider === input.provider),
     );
-    if (records.length === 0) {
+    if (!entity && legacyMatches.length === 0) {
       throw new PluginError(
         "E_NOT_CONFIGURED",
         "This Skill is not associated with the project",
       );
     }
-    const remaining = (config.skills[input.projectId] ?? []).filter(
-      (entry) => !records.includes(entry),
-    );
-    config.skills[input.projectId] = remaining;
-    for (const record of records) {
+    if (entity) {
+      const digest = await entityDigest(entity.entityPath);
+      const providers = input.provider
+        ? entity.providers.filter((entry) => entry === input.provider)
+        : entity.providers;
+      for (const provider of providers) {
+        const targetPath = providerSkillTarget(
+          input.workspaceDirectory,
+          provider,
+          entity.name,
+        );
+        const result = await removeSkillProjection({
+          workspaceDirectory: input.workspaceDirectory,
+          provider,
+          name: entity.name,
+          entityPath: entity.entityPath,
+          entityDigest: digest,
+        });
+        if (result.keptReason) {
+          hadLocalChanges = true;
+          kept.push(targetPath);
+        } else if (result.removed) {
+          deleted.push(targetPath);
+        }
+      }
+      entity.providers = input.provider
+        ? entity.providers.filter((entry) => entry !== input.provider)
+        : [];
+      if (digest !== entity.digest) hadLocalChanges = true;
+      if (input.deleteLocal) {
+        await removeLocalPath(input.workspaceDirectory, entity.entityPath);
+        deleted.push(entity.entityPath);
+        const index = records.findIndex(
+          (entry) => entry.assetId === entity.assetId,
+        );
+        if (index >= 0) records.splice(index, 1);
+        await removeBaselinesFor({
+          workspaceDirectory: input.workspaceDirectory,
+          assetId: entity.assetId,
+          provider: null,
+        });
+      } else if (await fileExists(entity.entityPath)) {
+        kept.push(entity.entityPath);
+      }
+      entity.updatedAt = new Date().toISOString();
+    }
+    for (const record of legacyMatches) {
       if (!(await fileExists(record.targetPath))) continue;
       const digest = await directoryDigest(record.targetPath).catch(() => null);
       if (digest && digest.digest !== record.baselineDigest) {
@@ -775,6 +983,10 @@ export async function unlinkRelationship(input: {
         provider: record.provider,
       });
     }
+    const removedLegacy = new Set<unknown>(legacyMatches);
+    config.skills[input.projectId] = records.filter(
+      (entry) => !removedLegacy.has(entry),
+    );
   } else if (input.kind === "prompt") {
     const stored = config.instructions[input.projectId];
     const baselines = await readBaselines(input.workspaceDirectory);
