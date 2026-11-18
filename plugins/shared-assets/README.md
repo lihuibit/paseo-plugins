@@ -58,7 +58,10 @@ paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --hom
 
 ## 已知限制
 
-Claude 只验证了目录约定，未做真实模型加载；Codex 目录已在 S4 验证。Provider 只要有
-已知的项目级 Skill 目录就会出现在 tabs 中，未验证项会明确标注。共享 `skills/global/`
-不再支持；迁移时只导入受支持的资产类型。平台不支持软链时，Provider 目录使用复制，
-界面会标注为复制。
+Codex（S4）、CodeBuddy（`.codebuddy/skills`）和 DeepSeek Harness
+（`deepseek-harness-native`，`.dsh/skills`）的 Skill 加载经过实测，均支持软链；
+CodeBuddy 的指令入口为 `.codebuddy/CODEBUDDY.md`，DeepSeek Harness 读取项目根
+`AGENTS.md`、复用 Codex 入口，不单独投影指令。Claude、Pi 只验证了目录约定，Copilot、
+OpenCode、Antigravity、Muse 标注“未验证”。Provider 只要有已知的项目级 Skill 目录就会
+出现在 tabs 中，未验证项会明确标注。共享 `skills/global/` 不再支持；迁移时只导入受支持
+的资产类型。平台不支持软链时，Provider 目录使用复制，界面会标注为复制。

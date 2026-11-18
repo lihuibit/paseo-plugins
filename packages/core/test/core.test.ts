@@ -16,6 +16,7 @@ import {
 import {
   expandProvider,
   INSTRUCTION_ENTRYPOINTS,
+  PROVIDERS,
   SKILL_ROOTS,
 } from "../src/providers";
 import { parseSkillFrontmatter } from "../src/skill-markdown";
@@ -157,5 +158,29 @@ describe("provider matrix", () => {
     expect(INSTRUCTION_ENTRYPOINTS.claude).toBe(".claude/CLAUDE.md");
     expect(SKILL_ROOTS.copilot).toBe(".github/skills");
     expect(SKILL_ROOTS.antigravity).toBeNull();
+  });
+
+  it("includes CodeBuddy and DeepSeek Harness", () => {
+    const codebuddy = PROVIDERS.find(
+      (provider) => provider.id === "codebuddy-code",
+    );
+    expect(codebuddy).toMatchObject({
+      binary: "codebuddy",
+      skillRoot: ".codebuddy/skills",
+      userSkillRoot: "~/.codebuddy/skills",
+      instructionEntrypoint: ".codebuddy/CODEBUDDY.md",
+      skillVerified: true,
+    });
+
+    const dsh = PROVIDERS.find(
+      (provider) => provider.id === "deepseek-harness-native",
+    );
+    expect(dsh).toMatchObject({
+      binary: "dsh",
+      skillRoot: ".dsh/skills",
+      userSkillRoot: "~/.dsh/skills",
+      instructionEntrypoint: null,
+      skillVerified: true,
+    });
   });
 });

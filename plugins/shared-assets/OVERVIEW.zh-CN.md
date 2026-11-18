@@ -39,5 +39,8 @@
 - 发布产生的提交保留在本地，直到有人推送仓库；插件不会强制推送。合并冲突需要在插件内或
   在 checkout 中手动解决。
 - 共享资产仅支持项目范围。不支持全局 Skills。
-- Provider 支持覆盖目录约定。Codex 的加载已验证；Claude 的目录约定受支持，但尚未验证真实
-  模型加载。
+- Provider 支持覆盖目录约定。Codex、CodeBuddy（`.codebuddy/skills`）和 DeepSeek Harness
+  （`deepseek-harness-native`，`.dsh/skills`）的加载已验证，包含软链。CodeBuddy 使用
+  `.codebuddy/CODEBUDDY.md` 作为指令入口；DeepSeek Harness 读取项目根 `AGENTS.md`，复用
+  Codex 入口，不单独投影指令。Claude、Pi、Copilot、OpenCode、Antigravity 和 Muse 仍为
+  未验证或仅遵循目录约定。

@@ -103,10 +103,9 @@ const PROVIDER_ORDER: readonly string[] = [
   "claude",
   "codex",
   "pi",
+  "deepseek-harness-native",
   "opencode",
   "copilot",
-  "omp",
-  "dsh",
   "antigravity",
   "muse",
 ];

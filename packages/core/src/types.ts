@@ -4,7 +4,15 @@ export type SyncMode = "auto" | "manual";
 export type AssetKind = "skill" | "prompt" | "knowledge" | "doc";
 export type SkillScope = "project";
 export type ProviderId =
-  "codex" | "claude" | "pi" | "copilot" | "opencode" | "antigravity" | "muse";
+  | "codex"
+  | "codebuddy-code"
+  | "claude"
+  | "pi"
+  | "deepseek-harness-native"
+  | "copilot"
+  | "opencode"
+  | "antigravity"
+  | "muse";
 export type ProviderSelection = ProviderId | "both";
 
 export interface BindingState {

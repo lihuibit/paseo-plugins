@@ -211,13 +211,14 @@ $PASEO_HOME/plugin-data/paseo-shared-assets/
 
 ## 投影
 
-| 资产             | 项目位置                                                                |
-| ---------------- | ----------------------------------------------------------------------- |
-| Skill            | `.paseo/skills/<name>/`（唯一实体）                                     |
-| Provider 软链    | `.codex/skills/<name>/`、`.claude/skills/<name>/`、`.pi/skills/<name>/` |
-| 共享 `AGENTS.md` | `.paseo/AGENTS.md`（canonical）                                         |
-| Codex 入口       | 项目根 `AGENTS.md`（符号链接，失败时受管副本）                          |
-| Claude 入口      | `.claude/CLAUDE.md`（符号链接，失败时受管副本）                         |
+| 资产             | 项目位置                                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Skill            | `.paseo/skills/<name>/`（唯一实体）                                                                                         |
+| Provider 软链    | `.codex/skills/<name>/`、`.codebuddy/skills/<name>/`、`.claude/skills/<name>/`、`.pi/skills/<name>/`、`.dsh/skills/<name>/` |
+| 共享 `AGENTS.md` | `.paseo/AGENTS.md`（canonical）                                                                                             |
+| Codex 入口       | 项目根 `AGENTS.md`（符号链接，失败时受管副本）                                                                              |
+| CodeBuddy 入口   | `.codebuddy/CODEBUDDY.md`（符号链接，失败时受管副本）                                                                       |
+| Claude 入口      | `.claude/CLAUDE.md`（符号链接，失败时受管副本）                                                                             |
 
 规则：
 
@@ -279,10 +280,12 @@ drift 按文件比较上次基线、项目 `.paseo/` 或 Provider 投影副本�
 
 ### Provider 矩阵
 
-`providers.list` 返回 7 个 Paseo Provider 的本机安装状态、Skill 目录、指令入口和验证
-状态。当前只有 Codex 的 Skill 加载经过实测；Claude、Pi 目录约定成立但 Paseo 内加载
-未验证；Copilot/OpenCode/Antigravity/Muse 标注“未验证”。OpenCode 的指令入口与 Codex
-相同，暂不单独投影指令。
+`providers.list` 返回 9 个 Paseo Provider 的本机安装状态、Skill 目录、指令入口和验证
+状态。Codex（S4）、CodeBuddy 和 DeepSeek Harness（`deepseek-harness-native`）的 Skill
+加载经过实测；Claude、Pi 目录约定成立但 Paseo 内加载未验证；
+Copilot/OpenCode/Antigravity/Muse 标注“未验证”。OpenCode 的指令入口与 Codex 相同，
+暂不单独投影指令。DeepSeek Harness 读取项目根 `AGENTS.md`，复用 Codex 入口，不单独
+投影指令。
 
 ### 同步模式
 
