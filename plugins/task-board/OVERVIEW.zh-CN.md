@@ -16,7 +16,7 @@ Agent，也可以新建 Agent 执行，并支持父子任务表达多步骤工�
 
 ## 配置
 
-- Paseo 0.15.4 至 0.16.x，并启用 plugins。
+- Paseo 0.15.4 或更高（不设上限），并启用 plugins。
 - 如需 Agent 主动通过注入的 `board_declare` 工具汇报，需要开启
   `daemon.mcp.injectIntoAgents`。未开启时看板仍可使用，但状态只能由生命周期 hooks 推断，
   界面会显示提示。

@@ -29,7 +29,7 @@ automatically.
 
 ## Setup
 
-- Paseo 0.15.4 through 0.16.x with plugins enabled.
+- Paseo 0.15.4 or newer with plugins enabled.
 - Git available on the daemon host, with access to the configured repository.
 - A registered Paseo project with at least one workspace.
 - A team repository with a valid `team-assets.json`, and explicit trust confirmation when binding

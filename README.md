@@ -18,7 +18,7 @@ Paseo 插件 monorepo。
 
 ## 环境要求
 
-- Paseo `>=0.15.4 <0.17.0`（清单里已锁定）
+- Paseo `>=0.15.4`（不设上限；0.15.4、0.16、0.17 beta 客户端可加载）
 - Node.js 20+、Git
 - Paseo daemon 已启用插件：`config.json` 中 `pluginsEnabled: true`
 
@@ -28,7 +28,8 @@ Paseo 插件 monorepo。
 | -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
 | `0.15.4`                   | 支持     | 两个插件 running；Screen/Sidebar、RPC、Agent 创建与 hooks、`board_declare`、共享资产、看板、`paseo-board` CLI |
 | `0.16.0` / `0.16.0-beta.2` | 支持     | 153 tests、`npm run e2e`、`e2e-i10`、task-board E2E                                                           |
-| `0.14.x` / `0.17.x`        | 拒绝     | 安装时返回 `requires Paseo ...`，不加载插件                                                                   |
+| `0.17.0-beta.1`            | 可加载   | 清单不设上限；client bundle 可加载，完整回归待跑                                                              |
+| `0.14.x`                   | 拒绝     | 安装时返回 `requires Paseo ...`，不加载插件                                                                   |
 
 0.15.4 的兼容处理：
 

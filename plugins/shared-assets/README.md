@@ -15,7 +15,7 @@
 paseo plugin install /absolute/path/to/paseo-plugins/plugins/shared-assets --home ~/.paseo-dev
 ```
 
-要求 Paseo `>=0.15.4 <0.17.0`、Git，并且宿主 `pluginsEnabled: true`。
+要求 Paseo `>=0.15.4`、Git，并且宿主 `pluginsEnabled: true`。
 
 ## 使用
 

@@ -19,7 +19,7 @@ tool results reach the provider through Paseo.
 
 ## Setup
 
-- Paseo 0.15.4 through 0.16.x with plugins enabled.
+- Paseo 0.15.4 or newer with plugins enabled.
 - `daemon.mcp.injectIntoAgents` enabled if agents should declare progress through the injected
   `board_declare` tool. Without it, the board still works, but states are inferred from lifecycle
   hooks and the board shows a warning.
